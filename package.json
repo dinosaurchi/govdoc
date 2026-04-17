@@ -11,5 +11,8 @@
   },
   "dependencies": {
     "concurrently": "^9.2.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1"
   }
 }
