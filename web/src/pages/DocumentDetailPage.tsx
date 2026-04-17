@@ -124,6 +124,7 @@ function DocumentDetailInner({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   const [showConsultInput, setShowConsultInput] = useState(false);
   const [consultBody, setConsultBody] = useState('');
+  const [analysisView, setAnalysisView] = useState<'rendered' | 'raw'>('rendered');
 
   const fetchDoc = async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
@@ -279,15 +280,37 @@ function DocumentDetailInner({ id }: { id: string }) {
           {/* AI Analyses Card */}
           <Card className="border-blue-100 bg-blue-50/30 overflow-hidden">
             <CardHeader className="bg-blue-50/50 border-b border-blue-100 pb-3">
-              <CardTitle className="text-base flex items-center gap-2 text-blue-800">
-                <BrainCircuit size={18} /> AI Analysis
-              </CardTitle>
+              <div className="flex items-center justify-between gap-4">
+                <CardTitle className="text-base flex items-center gap-2 text-blue-800">
+                  <BrainCircuit size={18} /> AI Analysis
+                </CardTitle>
+                <div className="inline-flex rounded-lg border border-blue-100 bg-white p-1 text-xs font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setAnalysisView('rendered')}
+                    className={`rounded-md px-3 py-1 transition ${
+                      analysisView === 'rendered' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-700'
+                    }`}
+                  >
+                    Rendered
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAnalysisView('raw')}
+                    className={`rounded-md px-3 py-1 transition ${
+                      analysisView === 'raw' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-700'
+                    }`}
+                  >
+                    Raw JSON
+                  </button>
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="p-6">
               {hasAnalysis ? (
                 <div className="space-y-4">
                   {doc.analyses.map((analysis) => (
-                    <AnalysisCard key={analysis.id} analysis={analysis} />
+                    <AnalysisCard key={analysis.id} analysis={analysis} view={analysisView} />
                   ))}
                 </div>
               ) : (
@@ -524,7 +547,7 @@ function DocumentDetailInner({ id }: { id: string }) {
   );
 }
 
-function AnalysisCard({ analysis }: { analysis: AIAnalysis }) {
+function AnalysisCard({ analysis, view }: { analysis: AIAnalysis; view: 'rendered' | 'raw' }) {
   const stageLabel = STAGE_LABELS[analysis.stage] || analysis.stage;
   const stageColor = STAGE_COLORS[analysis.stage] || 'bg-slate-100 text-slate-800';
   const payload = analysis.payload_json;
@@ -552,15 +575,278 @@ function AnalysisCard({ analysis }: { analysis: AIAnalysis }) {
         </div>
       </div>
       <div className="text-xs text-slate-600 space-y-1">
-        <pre className="whitespace-pre-wrap break-all bg-slate-50 rounded-lg p-3 border border-slate-100 overflow-x-auto max-h-40">
-          {JSON.stringify(payload, null, 2)}
-        </pre>
+        {view === 'rendered' ? (
+          <RenderedAnalysis stage={analysis.stage} payload={payload} />
+        ) : (
+          <pre className="whitespace-pre-wrap break-all bg-slate-50 rounded-lg p-3 border border-slate-100 overflow-x-auto max-h-40">
+            {JSON.stringify(payload, null, 2)}
+          </pre>
+        )}
       </div>
       <p className="text-[10px] text-slate-300">
-        {new Date(analysis.created_at).toLocaleString()} · prompt v{analysis.prompt_version}
+        {new Date(analysis.created_at).toLocaleString()}
       </p>
     </div>
   );
+}
+
+function RenderedAnalysis({ stage, payload }: { stage: string; payload: Record<string, unknown> }) {
+  if (stage === 'classify') {
+    return <RenderedClassification payload={payload} />;
+  }
+  if (stage === 'route') {
+    return <RenderedRouting payload={payload} />;
+  }
+  if (stage === 'escalate') {
+    return <RenderedEscalation payload={payload} />;
+  }
+
+  const rows = getRenderedRows(stage, payload);
+
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-lg border border-slate-100 bg-slate-50 p-3 text-sm text-slate-500">
+        No structured summary available for this analysis.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+      {rows.map((row) => (
+        <div key={row.label} className="space-y-1">
+          <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">{row.label}</p>
+          {row.items ? (
+            <ul className="list-disc pl-4 text-sm leading-relaxed text-slate-700">
+              {row.items.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm leading-relaxed text-slate-700">{row.value}</p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RenderedRouting({ payload }: { payload: Record<string, unknown> }) {
+  const suggestedDepartment = humanizeEnum(payload.suggested_department);
+  const secondaryDepartment = humanizeEnum(payload.secondary_department);
+  const routingRationale = stringifyValue(payload.routing_rationale);
+  const needsConsultation = booleanLabel(payload.needs_consultation);
+  const needsSupervisorReview = booleanLabel(payload.needs_supervisor_review);
+
+  return (
+    <div className="space-y-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+      <div className="flex flex-wrap gap-2">
+        {suggestedDepartment && <ClassifyPill label="Primary Route" value={suggestedDepartment} tone="blue" />}
+        {secondaryDepartment && <ClassifyPill label="Secondary" value={secondaryDepartment} tone="purple" />}
+        {needsConsultation && <ClassifyPill label="Consultation" value={needsConsultation} tone={needsConsultation === 'Yes' ? 'amber' : 'slate'} />}
+        {needsSupervisorReview && <ClassifyPill label="Supervisor Review" value={needsSupervisorReview} tone={needsSupervisorReview === 'Yes' ? 'amber' : 'slate'} />}
+      </div>
+
+      {routingRationale && (
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+          <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Routing Rationale</p>
+          <p className="mt-1 text-sm leading-relaxed text-slate-700">{routingRationale}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RenderedEscalation({ payload }: { payload: Record<string, unknown> }) {
+  const primaryRecommendation = humanizeEnum(payload.primary_recommendation);
+  const alternatives = Array.isArray(payload.alternatives)
+    ? payload.alternatives.map((item) => humanizeEnum(item)).filter(Boolean)
+    : [];
+  const ambiguityExplanation = stringifyValue(payload.ambiguity_explanation);
+  const consultationNeeded = booleanLabel(payload.needs_consultation);
+  const consultationReason = stringifyValue(payload.consultation_reason);
+
+  return (
+    <div className="space-y-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+      <div className="flex flex-wrap gap-2">
+        {primaryRecommendation && <ClassifyPill label="Primary Recommendation" value={primaryRecommendation} tone="blue" />}
+        {consultationNeeded && <ClassifyPill label="Consultation Needed" value={consultationNeeded} tone={consultationNeeded === 'Yes' ? 'amber' : 'slate'} />}
+      </div>
+
+      {alternatives.length > 0 && (
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+          <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Alternatives</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {alternatives.map((item) => (
+              <span key={item} className="rounded-full border border-purple-200 bg-purple-50 px-3 py-1 text-xs font-bold text-purple-700">
+                {item}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {ambiguityExplanation && (
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+          <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Ambiguity Explanation</p>
+          <p className="mt-1 text-sm leading-relaxed text-slate-700">{ambiguityExplanation}</p>
+        </div>
+      )}
+
+      {consultationReason && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2">
+          <p className="text-[10px] font-black uppercase tracking-wider text-amber-600">Consultation Reason</p>
+          <p className="mt-1 text-sm leading-relaxed text-amber-900">{consultationReason}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RenderedClassification({ payload }: { payload: Record<string, unknown> }) {
+  const docType = humanizeEnum(payload.doc_type);
+  const urgency = humanizeEnum(payload.urgency);
+  const confidentiality = humanizeEnum(payload.confidentiality);
+  const issuingAgency = stringifyValue(payload.issuing_agency);
+  const rationale = stringifyValue(payload.rationale);
+
+  return (
+    <div className="space-y-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+      <div className="flex flex-wrap gap-2">
+        {docType && <ClassifyPill label="Type" value={docType} tone="blue" />}
+        {urgency && <ClassifyPill label="Urgency" value={urgency} tone="amber" />}
+        {confidentiality && <ClassifyPill label="Security" value={confidentiality} tone="slate" />}
+      </div>
+
+      {issuingAgency && (
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+          <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Issuing Agency</p>
+          <p className="mt-1 text-sm font-semibold text-slate-800">{issuingAgency}</p>
+        </div>
+      )}
+
+      {rationale && (
+        <div className="rounded-lg border border-blue-100 bg-white px-3 py-2">
+          <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Classification Rationale</p>
+          <p className="mt-1 text-sm leading-relaxed text-slate-700">{rationale}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ClassifyPill({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: 'blue' | 'amber' | 'slate' | 'purple';
+}) {
+  const tones = {
+    blue: 'border-blue-200 bg-blue-50 text-blue-800',
+    amber: 'border-amber-200 bg-amber-50 text-amber-800',
+    slate: 'border-slate-200 bg-slate-100 text-slate-700',
+    purple: 'border-purple-200 bg-purple-50 text-purple-800',
+  };
+
+  return (
+    <div className={`rounded-full border px-3 py-1.5 ${tones[tone]}`}>
+      <p className="text-[9px] font-black uppercase tracking-wider opacity-70">{label}</p>
+      <p className="text-sm font-bold">{value}</p>
+    </div>
+  );
+}
+
+function getRenderedRows(stage: string, payload: Record<string, unknown>) {
+  switch (stage) {
+    case 'classify':
+      return compactRows([
+        valueRow('Document Type', payload.doc_type),
+        valueRow('Issuing Agency', payload.issuing_agency),
+        valueRow('Urgency', payload.urgency),
+        valueRow('Confidentiality', payload.confidentiality),
+        valueRow('Rationale', payload.rationale),
+      ]);
+    case 'summarize':
+      return compactRows([
+        listRow('Summary Points', payload.summary_points),
+        valueRow('Key Subject', payload.key_subject),
+        listRow('Key Entities', payload.key_entities),
+      ]);
+    case 'route':
+      return compactRows([
+        valueRow('Suggested Department', payload.suggested_department),
+        valueRow('Secondary Department', payload.secondary_department),
+        valueRow('Routing Rationale', payload.routing_rationale),
+        valueRow('Needs Consultation', booleanLabel(payload.needs_consultation)),
+        valueRow('Needs Supervisor Review', booleanLabel(payload.needs_supervisor_review)),
+      ]);
+    case 'escalate':
+      return compactRows([
+        valueRow('Primary Recommendation', payload.primary_recommendation),
+        listRow('Alternatives', payload.alternatives),
+        valueRow('Ambiguity Explanation', payload.ambiguity_explanation),
+        valueRow('Consultation Needed', booleanLabel(payload.needs_consultation)),
+        valueRow('Consultation Reason', payload.consultation_reason),
+      ]);
+    default:
+      return objectRows(payload);
+  }
+}
+
+function compactRows<T>(rows: Array<T | null>): T[] {
+  return rows.filter((row): row is T => row !== null);
+}
+
+function valueRow(label: string, value: unknown) {
+  const text = stringifyValue(value);
+  if (!text) return null;
+  return { label, value: text };
+}
+
+function listRow(label: string, value: unknown) {
+  if (!Array.isArray(value)) return null;
+  const items = value.map((item) => stringifyValue(item)).filter(Boolean);
+  if (items.length === 0) return null;
+  return { label, items };
+}
+
+function objectRows(payload: Record<string, unknown>) {
+  return Object.entries(payload)
+    .map(([key, value]) => {
+      if (Array.isArray(value)) return listRow(formatKey(key), value);
+      return valueRow(formatKey(key), value);
+    })
+    .filter((row): row is { label: string; value?: string; items?: string[] } => row !== null);
+}
+
+function formatKey(key: string): string {
+  return key
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function stringifyValue(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  return '';
+}
+
+function booleanLabel(value: unknown): string {
+  if (typeof value !== 'boolean') return '';
+  return value ? 'Yes' : 'No';
+}
+
+function humanizeEnum(value: unknown): string {
+  const text = stringifyValue(value);
+  if (!text) return '';
+  return text
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function ActionButton({
