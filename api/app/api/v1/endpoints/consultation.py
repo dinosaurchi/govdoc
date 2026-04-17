@@ -26,7 +26,16 @@ async def add_consultation_note(
     role: CurrentRole = Depends(deps.get_current_role),
 ):
     if role.id not in ["reviewer", "consultant", "supervisor"]:
-        raise HTTPException(status_code=403, detail="Not authorized to add consultation notes")
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": {
+                    "code": "FORBIDDEN_ACTION",
+                    "message": "Not authorized to add consultation notes",
+                    "details": {},
+                }
+            },
+        )
 
     workflow = WorkflowService(db)
     return await workflow.add_consultation(doc_id, role.id, body.content)
@@ -39,7 +48,16 @@ async def complete_consultation(
     role: CurrentRole = Depends(deps.get_current_role),
 ):
     if role.id not in ["consultant", "reviewer", "supervisor"]:
-        raise HTTPException(status_code=403, detail="Not authorized to complete consultation")
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": {
+                    "code": "FORBIDDEN_ACTION",
+                    "message": "Not authorized to complete consultation",
+                    "details": {},
+                }
+            },
+        )
 
     workflow = WorkflowService(db)
     return await workflow.complete_consultation(doc_id, role.id)

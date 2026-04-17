@@ -35,6 +35,7 @@ def get_documents(
     department_id: Optional[str] = None,
     q: Optional[str] = None,
     db: Session = Depends(deps.get_db),
+    role: CurrentRole = Depends(deps.get_current_role),
 ):
     repo = DocumentRepository(db)
     docs = repo.list(status=status, department_id=department_id, q=q)
@@ -90,30 +91,44 @@ async def create_document(
 
 
 @router.get("/{doc_id}", response_model=DocumentDetailOut)
-def get_document(doc_id: str, db: Session = Depends(deps.get_db)):
+def get_document(doc_id: str, db: Session = Depends(deps.get_db), role: CurrentRole = Depends(deps.get_current_role)):
     repo = DocumentRepository(db)
     doc = repo.get_with_relations(doc_id)
     if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "Document not found", "details": {}}},
+        )
     return doc
 
 
 @router.get("/{doc_id}/file")
-def get_document_file(doc_id: str, db: Session = Depends(deps.get_db)):
+def get_document_file(
+    doc_id: str, db: Session = Depends(deps.get_db), role: CurrentRole = Depends(deps.get_current_role)
+):
     """Stream raw file from storage."""
     repo = DocumentRepository(db)
     doc = repo.get(doc_id)
     if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "Document not found", "details": {}}},
+        )
     if not doc.files:
-        raise HTTPException(status_code=404, detail="No file attached to document")
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "No file attached to document", "details": {}}},
+        )
 
     doc_file = doc.files[0]
     storage = LocalFileStorage()
     try:
         content = storage.read(doc_file.storage_key)
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="File not found in storage")
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "File not found in storage", "details": {}}},
+        )
 
     return Response(
         content=content,
