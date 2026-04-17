@@ -1,10 +1,26 @@
+from sqlalchemy.orm import Session, joinedload
+
 from app.repositories.base import CRUDBase
-from app.models.document import Document, DocumentFile, ExtractedArtifact, AIAnalysis, RoutingDecision, ConsultationNote
+from app.models.document import Document, DocumentFile, RoutingDecision, ConsultationNote
 from app.schemas.document import DocumentCreate
 from pydantic import BaseModel
 
+
 class CRUDDocument(CRUDBase[Document, DocumentCreate, BaseModel]):
-    pass
+    def get_with_relations(self, db: Session, *, id: int) -> Document | None:
+        return (
+            db.query(Document)
+            .options(
+                joinedload(Document.files),
+                joinedload(Document.artifacts),
+                joinedload(Document.analysis),
+                joinedload(Document.decisions),
+                joinedload(Document.consultations),
+                joinedload(Document.audit_logs),
+            )
+            .filter(Document.id == id)
+            .first()
+        )
 
 class CRUDDocumentFile(CRUDBase[DocumentFile, BaseModel, BaseModel]):
     pass

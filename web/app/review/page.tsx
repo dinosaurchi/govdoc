@@ -12,15 +12,20 @@ export default function ReviewPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchApi('/documents')
-      .then(data => {
-        setDocuments(data);
-        setLoading(false);
-      })
-      .catch(err => {
+    let active = true;
+    (async () => {
+      try {
+        const data = await fetchApi('/documents');
+        if (active) setDocuments(data);
+      } catch (err) {
         console.error(err);
-        setLoading(false);
-      });
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
   }, []);
 
   return (

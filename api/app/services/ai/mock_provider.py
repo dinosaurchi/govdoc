@@ -2,6 +2,8 @@ from app.services.ai.interface import AIProviderInterface
 from typing import Dict, Any
 
 class MockAIProvider(AIProviderInterface):
+    source_label = "MockAIProvider (replace with Model Studio adapter)"
+
     async def analyze_document(self, content: str) -> Dict[str, Any]:
         return {
             "suggested_type": "công văn",

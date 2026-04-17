@@ -15,7 +15,9 @@ async def get_dashboard_stats(db: Session = Depends(deps.get_db), role: str = De
     
     return {
         "total_received": db.query(Document).count(),
-        "pending_review": stats_map.get(WorkflowState.registered, 0) + stats_map.get(WorkflowState.intake_received, 0),
+        "pending_review": stats_map.get(WorkflowState.registered, 0)
+        + stats_map.get(WorkflowState.intake_received, 0)
+        + stats_map.get(WorkflowState.routed_pending_human_review, 0),
         "under_consultation": stats_map.get(WorkflowState.consultation_requested, 0),
         "closed_today": stats_map.get(WorkflowState.closed, 0)
     }

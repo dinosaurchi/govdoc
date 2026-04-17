@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Enum, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, DateTime, Enum, ForeignKey, Text, JSON
 from sqlalchemy.orm import relationship
 from app.db.base_class import Base
 import enum
@@ -47,23 +47,31 @@ class DocumentFile(Base):
     __tablename__ = "document_files"
     
     id = Column(Integer, primary_key=True, index=True)
-    document_id = Column(Integer, ForeignKey("documents.id"))
-    file_path = Column(String)
-    file_name = Column(String)
-    mime_type = Column(String)
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
+    file_name = Column(String, nullable=False)
+    mime_type = Column(String, nullable=False)
+    file_size_bytes = Column(Integer, nullable=False, default=0)
+    storage_relative_path = Column(String, nullable=False)
+    sha256_hex = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
     document = relationship("Document", back_populates="files")
+    extracted_artifacts = relationship("ExtractedArtifact", back_populates="document_file")
 
 class ExtractedArtifact(Base):
     __tablename__ = "extracted_artifacts"
     
     id = Column(Integer, primary_key=True, index=True)
-    document_id = Column(Integer, ForeignKey("documents.id"))
-    key = Column(String)
-    value = Column(Text)
-    confidence = Column(Integer) # Percentage
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
+    document_file_id = Column(Integer, ForeignKey("document_files.id"), nullable=True)
+    extraction_method = Column(String, nullable=False)
+    extraction_source_label = Column(String, nullable=False)
+    extracted_text = Column(Text, nullable=False)
+    structured_metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
     document = relationship("Document", back_populates="artifacts")
+    document_file = relationship("DocumentFile", back_populates="extracted_artifacts")
 
 class AIAnalysis(Base):
     __tablename__ = "ai_analysis"
@@ -75,6 +83,7 @@ class AIAnalysis(Base):
     summary = Column(Text)
     suggested_department = Column(String)
     raw_response = Column(Text)
+    analysis_source_label = Column(String, nullable=False, default="mock_ai_provider")
     
     document = relationship("Document", back_populates="analysis")
 

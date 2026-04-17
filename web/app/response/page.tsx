@@ -7,24 +7,28 @@ import { Send, FileCheck, Download, History, UserCheck, Loader2, CheckCircle2 } 
 import { fetchApi } from '@/lib/api';
 import { useRole } from '@/hooks/use-role';
 
+type RespDoc = {
+  id: number;
+  title: string;
+  state: string;
+  analysis?: { summary?: string } | null;
+};
+
 export default function ResponsePage() {
   const { role } = useRole();
-  const [documents, setDocuments] = useState<any[]>([]);
-  const [selectedDoc, setSelectedDoc] = useState<any>(null);
+  const [documents, setDocuments] = useState<RespDoc[]>([]);
+  const [selectedDoc, setSelectedDoc] = useState<RespDoc | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
 
   const fetchResponses = async () => {
     try {
       const data = await fetchApi('/documents');
-      // Filter for docs in response_prepared or closed
-      const respDocs = data.filter((d: any) => 
+      const respDocs = data.filter((d: { state: string }) =>
         ['response_prepared', 'closed'].includes(d.state)
       );
       setDocuments(respDocs);
-      if (respDocs.length > 0 && !selectedDoc) {
-        setSelectedDoc(respDocs[0]);
-      }
+      setSelectedDoc((prev: RespDoc | null) => prev ?? respDocs[0] ?? null);
     } catch (err) {
       console.error(err);
     } finally {
@@ -33,7 +37,26 @@ export default function ResponsePage() {
   };
 
   useEffect(() => {
-    fetchResponses();
+    let active = true;
+    (async () => {
+      try {
+        const data = await fetchApi('/documents');
+        const respDocs = data.filter((d: { state: string }) =>
+          ['response_prepared', 'closed'].includes(d.state)
+        );
+        if (active) {
+          setDocuments(respDocs);
+          setSelectedDoc((prev: RespDoc | null) => prev ?? respDocs[0] ?? null);
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
   }, []);
 
   const handleApprove = async () => {
@@ -71,10 +94,18 @@ export default function ResponsePage() {
             </div>
           ) : (
             documents.map((doc) => (
-              <Card 
-                key={doc.id} 
-                className={`cursor-pointer transition-all ${selectedDoc?.id === doc.id ? 'border-emerald-500 shadow-md ring-2 ring-emerald-50' : 'hover:border-emerald-200'}`}
+              <div
+                key={doc.id}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') setSelectedDoc(doc);
+                }}
                 onClick={() => setSelectedDoc(doc)}
+                className="rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-400"
+              >
+              <Card 
+                className={`cursor-pointer transition-all ${selectedDoc?.id === doc.id ? 'border-emerald-500 shadow-md ring-2 ring-emerald-50' : 'hover:border-emerald-200'}`}
               >
                 <CardContent className="p-4 space-y-2">
                   <div className="flex items-center justify-between">
@@ -89,6 +120,7 @@ export default function ResponsePage() {
                   </div>
                 </CardContent>
               </Card>
+              </div>
             ))
           )}
         </div>

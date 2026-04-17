@@ -7,10 +7,17 @@ import { Send, User, MessageCircle, Loader2, Info } from 'lucide-react';
 import { fetchApi } from '@/lib/api';
 import { useRole } from '@/hooks/use-role';
 
+type ConsultDoc = {
+  id: number;
+  title: string;
+  state: string;
+  consultations: unknown[];
+};
+
 export default function ConsultationPage() {
   const { role } = useRole();
-  const [documents, setDocuments] = useState<any[]>([]);
-  const [selectedDoc, setSelectedDoc] = useState<any>(null);
+  const [documents, setDocuments] = useState<ConsultDoc[]>([]);
+  const [selectedDoc, setSelectedDoc] = useState<ConsultDoc | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
@@ -18,14 +25,12 @@ export default function ConsultationPage() {
   const fetchConsultations = async () => {
     try {
       const data = await fetchApi('/documents');
-      // Filter for documents that have consultations or are in consultation states
-      const consultDocs = data.filter((d: any) => 
-        d.state.includes('consultation') || d.consultations.length > 0
+      const consultDocs = data.filter(
+        (d: { state: string; consultations: unknown[] }) =>
+          d.state.includes('consultation') || d.consultations.length > 0
       );
       setDocuments(consultDocs);
-      if (consultDocs.length > 0 && !selectedDoc) {
-        setSelectedDoc(consultDocs[0]);
-      }
+      setSelectedDoc((prev: ConsultDoc | null) => prev ?? consultDocs[0] ?? null);
     } catch (err) {
       console.error(err);
     } finally {
@@ -34,14 +39,34 @@ export default function ConsultationPage() {
   };
 
   useEffect(() => {
-    fetchConsultations();
+    let active = true;
+    (async () => {
+      try {
+        const data = await fetchApi('/documents');
+        const consultDocs = data.filter(
+          (d: { state: string; consultations: unknown[] }) =>
+            d.state.includes('consultation') || d.consultations.length > 0
+        );
+        if (active) {
+          setDocuments(consultDocs);
+          setSelectedDoc((prev: ConsultDoc | null) => prev ?? consultDocs[0] ?? null);
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
   }, []);
 
   const handleSendMessage = async () => {
     if (!message.trim() || !selectedDoc) return;
     setSending(true);
     try {
-      await fetchApi(`/consultation/${selectedDoc.id}/note`, {
+      await fetchApi(`/consultation/${selectedDoc.id}/notes`, {
         method: 'POST',
         body: JSON.stringify({ content: message })
       });
@@ -77,10 +102,18 @@ export default function ConsultationPage() {
              </div>
           ) : (
             documents.map((doc) => (
-              <Card 
-                key={doc.id} 
-                className={`cursor-pointer transition-all ${selectedDoc?.id === doc.id ? 'border-blue-500 shadow-md ring-2 ring-blue-50' : 'hover:border-blue-200'}`}
+              <div
+                key={doc.id}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') setSelectedDoc(doc);
+                }}
                 onClick={() => setSelectedDoc(doc)}
+                className="rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-400"
+              >
+              <Card 
+                className={`cursor-pointer transition-all ${selectedDoc?.id === doc.id ? 'border-blue-500 shadow-md ring-2 ring-blue-50' : 'hover:border-blue-200'}`}
               >
                 <CardContent className="p-4 space-y-2">
                   <div className="flex items-center justify-between">
@@ -95,6 +128,7 @@ export default function ConsultationPage() {
                   </div>
                 </CardContent>
               </Card>
+              </div>
             ))
           )}
         </div>

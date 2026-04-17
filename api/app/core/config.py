@@ -9,6 +9,16 @@ class Settings(BaseSettings):
     
     DATABASE_URL: str = "sqlite:///./data/secureflow.db"
     SECRET_KEY: str = "secret"
+
+    # Stored under repo data/ (see AGENTS.md); container should mount ./data
+    LOCAL_FILE_STORAGE_ROOT: str = "./data/uploads"
+    MAX_UPLOAD_BYTES: int = 15 * 1024 * 1024
+    ALLOWED_UPLOAD_MIME_TYPES: List[str] = [
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "text/plain",
+    ]
     
     class Config:
         case_sensitive = True
