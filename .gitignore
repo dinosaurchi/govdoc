@@ -19,4 +19,5 @@ deploy/bundle/
 web/dist/
 .secrets/
 web/test-results
+test-results/
 .ai/tmp
