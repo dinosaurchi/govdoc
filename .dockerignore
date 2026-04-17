@@ -1,0 +1,8 @@
+# Prevent local dev artefacts from leaking into the Docker image
+api/data/
+data/
+.venv/
+.git/
+.ai/
+**/__pycache__/
+**/*.pyc
