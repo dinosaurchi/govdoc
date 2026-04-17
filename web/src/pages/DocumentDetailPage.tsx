@@ -18,6 +18,11 @@ import {
   XCircle,
   AlertCircle,
   Info,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  UserCheck,
+  Sparkles,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { apiGet, apiPost } from '@/lib/api';
@@ -30,7 +35,13 @@ import {
   isTerminalStatus,
   toRoleId,
   toButtonVariant,
+  PIPELINE_STAGES,
+  getPipelineIndex,
+  getResponsibleRoles,
+  getNextStepHint,
+  ROLE_LABEL,
   type ButtonVariant,
+  type Role,
 } from '@/pages/document-detail/workflow-actions';
 
 type AIAnalysis = {
@@ -245,10 +256,6 @@ function DocumentDetailInner({ id }: { id: string }) {
     ? { available: [], disabled: [], hidden: [] }
     : getWorkflowActionStates(doc, roleId);
 
-  const visibleActions = [
-    ...actionStates.available.map((a) => ({ action: a, available: true, reason: null as string | null })),
-    ...actionStates.disabled.map((d) => ({ action: d.action, available: false, reason: d.reason })),
-  ];
   const actionGroupKeys = ['analysis', 'review', 'consultation', 'closeout'] as const;
 
   const getActionIcon = (actionId: string) => {
@@ -502,244 +509,85 @@ function DocumentDetailInner({ id }: { id: string }) {
 
         {/* Sidebar — Workflow Actions */}
         <div className="space-y-6">
-          <Card>
+          <WorkflowPipeline status={doc.status} />
+
+          <Card data-testid="workflow-actions-panel">
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
                 <Shield size={18} className="text-slate-700" /> Workflow actions
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Status-aware helper text */}
-              <p className="text-sm text-slate-500 leading-relaxed">
-                {getWorkflowStatusMessage(doc.status)}
-              </p>
+              <WorkflowContext
+                status={doc.status}
+                role={role}
+                roleId={roleId}
+                terminal={terminal}
+                hasAvailableActions={actionStates.available.length > 0}
+              />
 
               {terminal ? (
                 <TerminalStateCard status={doc.status} />
-              ) : visibleActions.length === 0 ? (
-                <p className="text-sm text-slate-400 italic py-4 text-center">
-                  No workflow actions are currently available for your role.
-                </p>
+              ) : actionStates.available.length === 0 && actionStates.disabled.length === 0 ? (
+                <div
+                  className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-600 leading-relaxed"
+                  data-testid="workflow-empty"
+                >
+                  <p className="font-semibold text-slate-700">No actions for your role on this document.</p>
+                  <p className="mt-1 text-xs text-slate-500">{getNextStepHint(doc.status)}</p>
+                </div>
               ) : (
-                actionGroupKeys.map((groupKey) => {
-                  const groupItems = visibleActions.filter((v) => v.action.group === groupKey);
-                  if (groupItems.length === 0) return null;
-
-                  const hasAvailable = groupItems.some((v) => v.available);
-                  return (
-                    <div key={groupKey} className="space-y-2">
-                      <p className={`text-[10px] font-black uppercase tracking-widest ${hasAvailable ? 'text-slate-400' : 'text-slate-300'}`}>
-                        {ACTION_GROUP_LABELS[groupKey]}
+                <>
+                  {/* Primary "next step" actions — available right now for the active role */}
+                  {actionStates.available.length > 0 && (
+                    <div className="space-y-3" data-testid="workflow-available-actions">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 flex items-center gap-1">
+                        <Sparkles size={12} /> Next steps for you
                       </p>
-                      {groupItems.map(({ action, available: isAvailable, reason }) => {
-                        const icon = getActionIcon(action.id);
-                        const btnVariant: ButtonVariant = toButtonVariant(action.variant);
-
-                        // --- Special: reroute inline form ---
-                        if (action.id === 'reroute') {
-                          if (isAvailable) {
-                            return (
-                              <div key={action.id} className="space-y-2">
-                                {!showRerouteInput ? (
-                                  <ActionButton
-                                    label={action.label}
-                                    icon={icon}
-                                    onClick={() => {
-                                      setRerouteDepartmentId('');
-                                      setRerouteRationale('');
-                                      setShowRerouteInput(true);
-                                    }}
-                                    disabled={actionLoading}
-                                    available={true}
-                                    variant={btnVariant}
-                                  />
-                                ) : (
-                                  <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 space-y-3">
-                                    <div className="space-y-1">
-                                      <label htmlFor="reroute-department" className="text-xs font-bold text-slate-600">
-                                        Reassign department
-                                      </label>
-                                      <select
-                                        id="reroute-department"
-                                        value={rerouteDepartmentId}
-                                        onChange={(e) => setRerouteDepartmentId(e.target.value)}
-                                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                                      >
-                                        <option value="">Select a department...</option>
-                                        {availableDepartments.map((department) => (
-                                          <option key={department.id} value={department.id}>
-                                            {department.name}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </div>
-                                    <div className="space-y-1">
-                                      <label htmlFor="reroute-rationale" className="text-xs font-bold text-slate-600">
-                                        Rationale
-                                      </label>
-                                      <textarea
-                                        id="reroute-rationale"
-                                        value={rerouteRationale}
-                                        onChange={(e) => setRerouteRationale(e.target.value)}
-                                        placeholder="Explain why the document should be reassigned..."
-                                        rows={3}
-                                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-                                      />
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                      <button
-                                        type="button"
-                                        disabled={actionLoading || !rerouteDepartmentId}
-                                        onClick={() => {
-                                          handleAction('reroute', {
-                                            department_id: rerouteDepartmentId,
-                                            rationale: rerouteRationale.trim(),
-                                          });
-                                          setRerouteDepartmentId('');
-                                          setRerouteRationale('');
-                                          setShowRerouteInput(false);
-                                        }}
-                                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                                      >
-                                        {actionLoading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
-                                        Confirm reroute
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setShowRerouteInput(false);
-                                          setRerouteDepartmentId('');
-                                          setRerouteRationale('');
-                                        }}
-                                        className="px-3 py-2 text-slate-500 hover:text-slate-700 text-sm font-medium rounded-xl hover:bg-slate-100 transition"
-                                      >
-                                        Cancel
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          }
-
-                          return (
-                            <DisabledActionWrapper key={action.id} reason={reason}>
-                              <ActionButton
-                                label={action.label}
-                                icon={icon}
-                                onClick={() => {}}
-                                disabled={true}
-                                available={false}
-                                variant={btnVariant}
-                              />
-                            </DisabledActionWrapper>
-                          );
-                        }
-
-                        // --- Special: request-consultation inline form ---
-                        if (action.id === 'request-consultation') {
-                          if (isAvailable) {
-                            return (
-                              <div key={action.id} className="space-y-2">
-                                {!showConsultInput ? (
-                                  <ActionButton
-                                    label={action.label}
-                                    icon={icon}
-                                    onClick={() => setShowConsultInput(true)}
-                                    disabled={actionLoading}
-                                    available={true}
-                                    variant={btnVariant}
-                                  />
-                                ) : (
-                                  <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3 space-y-2">
-                                    <textarea
-                                      value={consultBody}
-                                      onChange={(e) => setConsultBody(e.target.value)}
-                                      placeholder="Describe what you need consulted on..."
-                                      rows={3}
-                                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 outline-none resize-none"
-                                    />
-                                    <div className="flex items-center gap-2">
-                                      <button
-                                        type="button"
-                                        disabled={actionLoading || !consultBody.trim()}
-                                        onClick={() => {
-                                          handleAction('request-consultation', { target_role: 'consultant', body: consultBody });
-                                          setConsultBody('');
-                                          setShowConsultInput(false);
-                                        }}
-                                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-xl font-bold text-sm hover:bg-amber-700 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                                      >
-                                        {actionLoading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
-                                        Send
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => { setShowConsultInput(false); setConsultBody(''); }}
-                                        className="px-3 py-2 text-slate-500 hover:text-slate-700 text-sm font-medium rounded-xl hover:bg-slate-100 transition"
-                                      >
-                                        Cancel
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          }
-                          // Disabled state
-                          return (
-                            <DisabledActionWrapper key={action.id} reason={reason}>
-                              <ActionButton
-                                label={action.label}
-                                icon={icon}
-                                onClick={() => {}}
-                                disabled={true}
-                                available={false}
-                                variant={btnVariant}
-                              />
-                            </DisabledActionWrapper>
-                          );
-                        }
-
-                        // --- Special: resolve-consultation (auto-select note) ---
-                        if (action.id === 'resolve-consultation') {
-                          return (
-                            <DisabledActionWrapper key={action.id} reason={!isAvailable ? reason : null}>
-                              <ActionButton
-                                label={action.label}
-                                icon={icon}
-                                onClick={() => {
-                                  const unresolved = doc.consultation_notes.filter((n) => n.resolved_at === null);
-                                  const mostRecent = unresolved[unresolved.length - 1];
-                                  if (mostRecent) {
-                                    handleAction('resolve-consultation', { note_id: mostRecent.id });
-                                  }
-                                }}
-                                disabled={actionLoading || !isAvailable}
-                                available={isAvailable}
-                                variant={btnVariant}
-                              />
-                            </DisabledActionWrapper>
-                          );
-                        }
-
-                        // --- Default action rendering ---
+                      {actionGroupKeys.map((groupKey) => {
+                        const groupItems = actionStates.available.filter((a) => a.group === groupKey);
+                        if (groupItems.length === 0) return null;
                         return (
-                          <DisabledActionWrapper key={action.id} reason={!isAvailable ? reason : null}>
-                            <ActionButton
-                              label={action.label}
-                              icon={icon}
-                              onClick={() => handleAction(action.id)}
-                              disabled={actionLoading || !isAvailable}
-                              available={isAvailable}
-                              variant={btnVariant}
-                            />
-                          </DisabledActionWrapper>
+                          <div key={groupKey} className="space-y-2">
+                            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                              {ACTION_GROUP_LABELS[groupKey]}
+                            </p>
+                            {groupItems.map((action) =>
+                              renderActionControl({
+                                action,
+                                isAvailable: true,
+                                reason: null,
+                                getActionIcon,
+                                showRerouteInput,
+                                setShowRerouteInput,
+                                rerouteDepartmentId,
+                                setRerouteDepartmentId,
+                                rerouteRationale,
+                                setRerouteRationale,
+                                availableDepartments,
+                                showConsultInput,
+                                setShowConsultInput,
+                                consultBody,
+                                setConsultBody,
+                                handleAction,
+                                actionLoading,
+                                doc,
+                              }),
+                            )}
+                          </div>
                         );
                       })}
                     </div>
-                  );
-                })
+                  )}
+
+                  {/* Disabled actions — role allows them, but status doesn't */}
+                  {actionStates.disabled.length > 0 && (
+                    <DisabledActionsDisclosure
+                      disabled={actionStates.disabled}
+                      getActionIcon={getActionIcon}
+                    />
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
@@ -1104,6 +952,408 @@ function DisabledActionWrapper({ reason, children }: { reason: string | null; ch
     <div className="space-y-1">
       {children}
       {reason && <p className="text-[10px] text-slate-400 px-1">{reason}</p>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Workflow guide — visual pipeline + role context + disabled-actions disclosure
+// ---------------------------------------------------------------------------
+
+function WorkflowPipeline({ status }: { status: string }) {
+  const terminal = isTerminalStatus(status);
+  const currentIdx = getPipelineIndex(status);
+
+  // When the doc is in `in_consultation`, treat that as the current stage; when
+  // terminal, we highlight the "nearest" stage reached before the terminal hop.
+  return (
+    <Card data-testid="workflow-pipeline">
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <ScrollText size={18} className="text-slate-700" /> Workflow progress
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ol className="space-y-2">
+          {PIPELINE_STAGES.map((stage, idx) => {
+            // Determine visual status of this node.
+            const done = !terminal && currentIdx > idx;
+            const active = !terminal && currentIdx === idx;
+            const icon = done ? (
+              <CheckCircle2 size={16} className="text-emerald-600" />
+            ) : active ? (
+              <Circle size={16} className="text-blue-600 fill-blue-100" />
+            ) : (
+              <Circle size={16} className="text-slate-300" />
+            );
+            return (
+              <li
+                key={stage.id}
+                className={`flex items-start gap-3 rounded-lg px-2 py-1.5 ${
+                  active ? 'bg-blue-50' : ''
+                }`}
+                data-testid={`pipeline-stage-${stage.id}`}
+                data-status={active ? 'active' : done ? 'done' : 'pending'}
+              >
+                <div className="mt-0.5 shrink-0">{icon}</div>
+                <div className="flex-1">
+                  <p
+                    className={`text-xs font-bold ${
+                      active ? 'text-blue-800' : done ? 'text-slate-700' : 'text-slate-400'
+                    }`}
+                  >
+                    {stage.label}
+                  </p>
+                  <p className={`text-[11px] ${active ? 'text-blue-700' : 'text-slate-400'}`}>
+                    {stage.description}
+                  </p>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+        {terminal && (
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
+            <span className="font-bold">Terminal state:</span> {status.replace(/_/g, ' ')}. No
+            further workflow actions are possible.
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function WorkflowContext({
+  status,
+  role,
+  roleId,
+  terminal,
+  hasAvailableActions,
+}: {
+  status: string;
+  role: string;
+  roleId: Role;
+  terminal: boolean;
+  hasAvailableActions: boolean;
+}) {
+  const responsible = getResponsibleRoles(status);
+  const hint = getNextStepHint(status);
+  const statusMessage = getWorkflowStatusMessage(status);
+  const needsOtherRole =
+    !terminal && !hasAvailableActions && responsible.length > 0 && !responsible.includes(roleId);
+
+  return (
+    <div className="space-y-3" data-testid="workflow-context">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 border border-blue-200 px-2.5 py-1 font-bold text-blue-800">
+          <UserCheck size={12} /> Acting as {role}
+        </span>
+        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 border border-slate-200 px-2.5 py-1 font-bold text-slate-700 capitalize">
+          Status: {status.replace(/_/g, ' ')}
+        </span>
+      </div>
+
+      {statusMessage && (
+        <p className="text-sm text-slate-600 leading-relaxed">{statusMessage}</p>
+      )}
+
+      {!terminal && hint && (
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+          <span className="font-bold text-slate-700">What happens next: </span>
+          {hint}
+        </div>
+      )}
+
+      {needsOtherRole && (
+        <div
+          className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-900"
+          data-testid="workflow-waiting-on"
+        >
+          <p className="font-bold">Waiting on another role</p>
+          <p>
+            Your current role ({role}) cannot act on this status. Switch to{' '}
+            {responsible.map((r, i) => (
+              <span key={r}>
+                <span className="font-semibold">{ROLE_LABEL[r]}</span>
+                {i < responsible.length - 1 ? ' or ' : ''}
+              </span>
+            ))}
+            {' '}to continue.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+type ActionControlParams = {
+  action: { id: string; label: string; variant: 'default' | 'success' | 'caution' | 'destructive' };
+  isAvailable: boolean;
+  reason: string | null;
+  getActionIcon: (id: string) => React.ReactNode;
+  showRerouteInput: boolean;
+  setShowRerouteInput: (v: boolean) => void;
+  rerouteDepartmentId: string;
+  setRerouteDepartmentId: (v: string) => void;
+  rerouteRationale: string;
+  setRerouteRationale: (v: string) => void;
+  availableDepartments: Array<{ id: string; name: string }>;
+  showConsultInput: boolean;
+  setShowConsultInput: (v: boolean) => void;
+  consultBody: string;
+  setConsultBody: (v: string) => void;
+  handleAction: (action: string, payload?: Record<string, string>) => void | Promise<void>;
+  actionLoading: boolean;
+  doc: { consultation_notes: Array<{ id: string; resolved_at: string | null }> };
+};
+
+function renderActionControl(p: ActionControlParams): React.ReactNode {
+  const {
+    action,
+    isAvailable,
+    reason,
+    getActionIcon,
+    showRerouteInput,
+    setShowRerouteInput,
+    rerouteDepartmentId,
+    setRerouteDepartmentId,
+    rerouteRationale,
+    setRerouteRationale,
+    availableDepartments,
+    showConsultInput,
+    setShowConsultInput,
+    consultBody,
+    setConsultBody,
+    handleAction,
+    actionLoading,
+    doc,
+  } = p;
+  const icon = getActionIcon(action.id);
+  const btnVariant: ButtonVariant = toButtonVariant(action.variant);
+
+  if (action.id === 'reroute') {
+    if (isAvailable) {
+      return (
+        <div key={action.id} className="space-y-2">
+          {!showRerouteInput ? (
+            <ActionButton
+              label={action.label}
+              icon={icon}
+              onClick={() => {
+                setRerouteDepartmentId('');
+                setRerouteRationale('');
+                setShowRerouteInput(true);
+              }}
+              disabled={actionLoading}
+              available
+              variant={btnVariant}
+            />
+          ) : (
+            <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 space-y-3">
+              <div className="space-y-1">
+                <label htmlFor="reroute-department" className="text-xs font-bold text-slate-600">
+                  Reassign department
+                </label>
+                <select
+                  id="reroute-department"
+                  value={rerouteDepartmentId}
+                  onChange={(e) => setRerouteDepartmentId(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  <option value="">Select a department...</option>
+                  {availableDepartments.map((department) => (
+                    <option key={department.id} value={department.id}>
+                      {department.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="reroute-rationale" className="text-xs font-bold text-slate-600">
+                  Rationale
+                </label>
+                <textarea
+                  id="reroute-rationale"
+                  value={rerouteRationale}
+                  onChange={(e) => setRerouteRationale(e.target.value)}
+                  placeholder="Explain why the document should be reassigned..."
+                  rows={3}
+                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={actionLoading || !rerouteDepartmentId}
+                  onClick={() => {
+                    handleAction('reroute', {
+                      department_id: rerouteDepartmentId,
+                      rationale: rerouteRationale.trim(),
+                    });
+                    setRerouteDepartmentId('');
+                    setRerouteRationale('');
+                    setShowRerouteInput(false);
+                  }}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {actionLoading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
+                  Confirm reroute
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowRerouteInput(false);
+                    setRerouteDepartmentId('');
+                    setRerouteRationale('');
+                  }}
+                  className="px-3 py-2 text-slate-500 hover:text-slate-700 text-sm font-medium rounded-xl hover:bg-slate-100 transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+    return (
+      <DisabledActionWrapper key={action.id} reason={reason}>
+        <ActionButton label={action.label} icon={icon} onClick={() => {}} disabled available={false} variant={btnVariant} />
+      </DisabledActionWrapper>
+    );
+  }
+
+  if (action.id === 'request-consultation') {
+    if (isAvailable) {
+      return (
+        <div key={action.id} className="space-y-2">
+          {!showConsultInput ? (
+            <ActionButton
+              label={action.label}
+              icon={icon}
+              onClick={() => setShowConsultInput(true)}
+              disabled={actionLoading}
+              available
+              variant={btnVariant}
+            />
+          ) : (
+            <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3 space-y-2">
+              <textarea
+                value={consultBody}
+                onChange={(e) => setConsultBody(e.target.value)}
+                placeholder="Describe what you need consulted on..."
+                rows={3}
+                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 outline-none resize-none"
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={actionLoading || !consultBody.trim()}
+                  onClick={() => {
+                    handleAction('request-consultation', { target_role: 'consultant', body: consultBody });
+                    setConsultBody('');
+                    setShowConsultInput(false);
+                  }}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-xl font-bold text-sm hover:bg-amber-700 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {actionLoading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
+                  Send
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowConsultInput(false);
+                    setConsultBody('');
+                  }}
+                  className="px-3 py-2 text-slate-500 hover:text-slate-700 text-sm font-medium rounded-xl hover:bg-slate-100 transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+    return (
+      <DisabledActionWrapper key={action.id} reason={reason}>
+        <ActionButton label={action.label} icon={icon} onClick={() => {}} disabled available={false} variant={btnVariant} />
+      </DisabledActionWrapper>
+    );
+  }
+
+  if (action.id === 'resolve-consultation') {
+    return (
+      <DisabledActionWrapper key={action.id} reason={!isAvailable ? reason : null}>
+        <ActionButton
+          label={action.label}
+          icon={icon}
+          onClick={() => {
+            const unresolved = doc.consultation_notes.filter((n) => n.resolved_at === null);
+            const mostRecent = unresolved[unresolved.length - 1];
+            if (mostRecent) {
+              handleAction('resolve-consultation', { note_id: mostRecent.id });
+            }
+          }}
+          disabled={actionLoading || !isAvailable}
+          available={isAvailable}
+          variant={btnVariant}
+        />
+      </DisabledActionWrapper>
+    );
+  }
+
+  return (
+    <DisabledActionWrapper key={action.id} reason={!isAvailable ? reason : null}>
+      <ActionButton
+        label={action.label}
+        icon={icon}
+        onClick={() => handleAction(action.id)}
+        disabled={actionLoading || !isAvailable}
+        available={isAvailable}
+        variant={btnVariant}
+      />
+    </DisabledActionWrapper>
+  );
+}
+
+function DisabledActionsDisclosure({
+  disabled,
+  getActionIcon,
+}: {
+  disabled: Array<{ action: { id: string; label: string; variant: 'default' | 'success' | 'caution' | 'destructive' }; reason: string }>;
+  getActionIcon: (id: string) => React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-t border-slate-100 pt-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between gap-2 text-xs font-bold text-slate-500 hover:text-slate-700 transition"
+        data-testid="workflow-disabled-toggle"
+      >
+        <span className="flex items-center gap-1">
+          {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          Actions not available right now ({disabled.length})
+        </span>
+      </button>
+      {open && (
+        <ul className="mt-3 space-y-2" data-testid="workflow-disabled-list">
+          {disabled.map(({ action, reason }) => (
+            <li
+              key={action.id}
+              className="flex items-start gap-2 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2"
+            >
+              <div className="mt-0.5 shrink-0 text-slate-400">{getActionIcon(action.id)}</div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold text-slate-600">{action.label}</p>
+                <p className="text-[11px] text-slate-500">{reason}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

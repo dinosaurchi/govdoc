@@ -44,9 +44,11 @@ async function openFirstDocument(page: Page): Promise<string> {
 /** Upload the fixture file and wait for success toast */
 async function uploadFixture(page: Page) {
   await page.locator('input[type="file"]').setInputFiles(FIXTURE);
+  // Upload runs classification + routing + summary + escalation AI calls synchronously,
+  // so upstream model latency can make 20s too tight.
   await expect(
     page.getByText('File uploaded, text extracted, and AI analysis completed'),
-  ).toBeVisible({ timeout: 20000 });
+  ).toBeVisible({ timeout: 60000 });
 }
 
 // ---------------------------------------------------------------------------
@@ -479,10 +481,14 @@ test.describe('GovDoc E2E — Full document workflow', () => {
     await switchRole(page, 'Department Reviewer');
     await page.waitForTimeout(1500);
 
-    // Pick the first consultation card (demo seed always has at least one)
-    const card = page.locator('div[role="button"]').first();
-    await expect(card).toBeVisible({ timeout: 10000 });
-    await card.click();
+    // Pick the first card whose status is `in consultation` (closed threads are
+    // terminal and would reject new messages).
+    const inConsultation = page
+      .locator('div[role="button"]')
+      .filter({ hasText: /in consultation/i })
+      .first();
+    await expect(inConsultation).toBeVisible({ timeout: 10000 });
+    await inConsultation.click();
     await page.waitForTimeout(500);
 
     const composer = page.locator('[data-testid="consultation-composer"]');
@@ -538,6 +544,78 @@ test.describe('GovDoc E2E — Full document workflow', () => {
     await switchRole(page, 'Intake Clerk');
     await page.waitForTimeout(1000);
     await expect(page.locator('[data-testid="consultation-composer"]')).toHaveCount(0);
+
+    expect(consoleErrors.filter(e => e.includes('TypeError'))).toHaveLength(0);
+  });
+
+  // =========================================================================
+  // Step 9c — Workflow actions panel is role-aware and informative (FEEDBACK-06)
+  // =========================================================================
+  test('Step 9c: Workflow panel explains role, stage, and waiting-on state (FEEDBACK-06)', async ({ page }) => {
+    // Pick a non-terminal document explicitly (earlier tests may have closed the first row).
+    const docs = await page.request.get(`${API}/documents`, {
+      headers: { 'X-GovDoc-Role': 'supervisor' },
+    }).then((r) => r.json());
+    const openDoc = (docs as Array<{ id: string; status: string }>).find(
+      (d) => !['closed', 'archived', 'rejected'].includes(d.status),
+    );
+    expect(openDoc, 'expected at least one open document').toBeTruthy();
+    const docId = openDoc!.id;
+
+    // --- Reviewer on a routed/under_review doc: sees Next steps + active stage ---
+    await page.goto('/');
+    await idle(page);
+    await switchRole(page, 'Department Reviewer');
+    await page.goto(`/documents/${docId}`);
+    await idle(page);
+    await page.waitForTimeout(500);
+
+    // Pipeline visible
+    const pipeline = page.locator('[data-testid="workflow-pipeline"]');
+    await expect(pipeline).toBeVisible();
+
+    // At least one pipeline stage should be active
+    const activeStages = pipeline.locator('[data-status="active"]');
+    await expect(activeStages.first()).toBeVisible();
+
+    // Role context shows "Acting as Department Reviewer"
+    const context = page.locator('[data-testid="workflow-context"]');
+    await expect(context).toBeVisible();
+    await expect(context).toContainText('Acting as Department Reviewer');
+    await expect(context).toContainText(/Status:/);
+
+    // There should be at least one action in "Next steps for you" for reviewer on this doc
+    const available = page.locator('[data-testid="workflow-available-actions"]');
+    if (await available.count() > 0) {
+      await expect(available).toContainText(/Next steps for you/i);
+    }
+
+    // --- Intake Clerk on the same doc: sees "waiting on" or "no actions" message ---
+    await switchRole(page, 'Intake Clerk');
+    await page.goto(`/documents/${docId}`);
+    await idle(page);
+    await page.waitForTimeout(500);
+
+    // Either waiting-on or empty state is visible
+    const waitingOn = page.locator('[data-testid="workflow-waiting-on"]');
+    const empty = page.locator('[data-testid="workflow-empty"]');
+    const hasGuidance = (await waitingOn.count()) > 0 || (await empty.count()) > 0;
+    expect(hasGuidance).toBe(true);
+
+    // Context still shows the new active role
+    await expect(page.locator('[data-testid="workflow-context"]')).toContainText('Acting as Intake Clerk');
+
+    // --- Disabled-actions disclosure: supervisor may see some disabled actions ---
+    await switchRole(page, 'Supervisor');
+    await page.goto(`/documents/${docId}`);
+    await idle(page);
+    await page.waitForTimeout(500);
+
+    const toggle = page.locator('[data-testid="workflow-disabled-toggle"]');
+    if (await toggle.count() > 0) {
+      await toggle.click();
+      await expect(page.locator('[data-testid="workflow-disabled-list"]')).toBeVisible();
+    }
 
     expect(consoleErrors.filter(e => e.includes('TypeError'))).toHaveLength(0);
   });

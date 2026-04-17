@@ -374,3 +374,91 @@ const VARIANT_COLOR_MAP: Record<WorkflowAction['variant'], ButtonVariant> = {
 export function toButtonVariant(variant: WorkflowAction['variant']): ButtonVariant {
   return VARIANT_COLOR_MAP[variant];
 }
+
+// ---------------------------------------------------------------------------
+// Pipeline stepper
+// ---------------------------------------------------------------------------
+
+/** Canonical linear progression of an active document through the workflow.
+ *  Terminal states (closed/out_of_scope/ingest_failed/analysis_failed) are
+ *  not part of this linear progression. */
+export const PIPELINE_STAGES: readonly { id: string; label: string; description: string }[] = [
+  { id: 'received', label: 'Received', description: 'File accepted by the intake API.' },
+  { id: 'extracted', label: 'Extracted', description: 'Text extracted from the file.' },
+  { id: 'analyzed', label: 'Analyzed', description: 'AI classification & routing suggestions generated.' },
+  { id: 'routed', label: 'Routed', description: 'Awaiting reviewer claim.' },
+  { id: 'under_review', label: 'Under Review', description: 'Reviewer handling the document.' },
+  { id: 'in_consultation', label: 'In Consultation', description: 'Cross-department consultation in progress.' },
+  { id: 'approved', label: 'Approved', description: 'Approved by a supervisor.' },
+  { id: 'closed', label: 'Closed', description: 'File closed. No further actions.' },
+] as const;
+
+/** Returns the index of the status inside PIPELINE_STAGES, or -1 for terminal
+ *  error states / unknown statuses. */
+export function getPipelineIndex(status: string): number {
+  return PIPELINE_STAGES.findIndex((s) => s.id === status);
+}
+
+// ---------------------------------------------------------------------------
+// "Responsible role" hint for the current status
+// ---------------------------------------------------------------------------
+
+export const ROLE_LABEL: Record<Role, string> = {
+  intake_clerk: 'Intake Clerk',
+  reviewer: 'Reviewer',
+  consultant: 'Consultant',
+  supervisor: 'Supervisor',
+};
+
+/** Describes which role is expected to act next for a given status. Used to
+ *  educate users who don't yet understand the workflow. */
+export function getResponsibleRoles(status: string): Role[] {
+  switch (status) {
+    case 'received':
+    case 'extracted':
+      return []; // system/background
+    case 'analyzed':
+      return ['reviewer', 'supervisor'];
+    case 'routed':
+      return ['reviewer', 'supervisor'];
+    case 'under_review':
+      return ['reviewer', 'supervisor'];
+    case 'in_consultation':
+      return ['reviewer', 'consultant', 'supervisor'];
+    case 'approved':
+      return ['supervisor'];
+    default:
+      return [];
+  }
+}
+
+/** Short next-step hint for the given status — rendered next to the status
+ *  pill on the document detail page. */
+export function getNextStepHint(status: string): string {
+  switch (status) {
+    case 'received':
+      return 'Waiting for the system to finish extracting text from the file.';
+    case 'extracted':
+      return 'Waiting for AI analysis to run.';
+    case 'analyzed':
+      return 'A Reviewer or Supervisor must approve or reroute the AI-suggested department.';
+    case 'routed':
+      return 'A Reviewer must open this document to begin review (assignment happens on open).';
+    case 'under_review':
+      return 'A Reviewer must approve, reroute, request consultation, or mark out of scope.';
+    case 'in_consultation':
+      return 'The Consultant (or the Reviewer) must resolve the open consultation note to continue.';
+    case 'approved':
+      return 'A Supervisor can close this document.';
+    case 'closed':
+      return 'No further actions — the document is archived.';
+    case 'out_of_scope':
+      return 'No further actions — the document was marked out of scope.';
+    case 'ingest_failed':
+      return 'No further actions — file ingestion failed.';
+    case 'analysis_failed':
+      return 'No further actions — AI analysis failed.';
+    default:
+      return '';
+  }
+}
