@@ -25,15 +25,15 @@ async function idle(page: Page) {
   await page.waitForLoadState('networkidle');
 }
 
-/** Navigate to the review queue and click the first document's View link.
+/** Navigate to the review queue and click the first document row.
  *  Returns the document ID extracted from the URL. */
 async function openFirstDocument(page: Page): Promise<string> {
   await page.locator('nav').getByText('Review', { exact: true }).click();
   await expect(page).toHaveURL(/\/review$/);
   await page.waitForTimeout(2000);
-  const link = page.locator('table tbody tr:first-child td:last-child a');
-  await link.waitFor({ state: 'visible' });
-  await link.click();
+  const row = page.locator('table tbody tr').first();
+  await row.waitFor({ state: 'visible' });
+  await row.click();
   await expect(page).toHaveURL(/\/documents\/[^/]+$/);
   await idle(page);
   await page.waitForTimeout(1000);
@@ -123,6 +123,28 @@ test.describe('GovDoc E2E — Full document workflow', () => {
     await uploadFixture(page);
 
     // BUG-001 check
+    expect(consoleErrors.filter(e => e.includes('TypeError'))).toHaveLength(0);
+  });
+
+  // =========================================================================
+  // Step 3b — Review queue rows are clickable (FEEDBACK-01)
+  // =========================================================================
+  test('Step 3b: Review queue rows are clickable (FEEDBACK-01)', async ({ page }) => {
+    await page.goto('/');
+    await idle(page);
+    await switchRole(page, 'Department Reviewer');
+    await page.locator('nav').getByText('Review', { exact: true }).click();
+    await expect(page).toHaveURL(/\/review$/);
+    await page.waitForTimeout(2000);
+
+    const row = page.locator('table tbody tr[data-testid="review-row"]').first();
+    await expect(row).toBeVisible({ timeout: 10000 });
+
+    // Clicking anywhere on the row (not on a link) should navigate to the detail page
+    const titleCell = row.locator('td').first();
+    await titleCell.click();
+    await expect(page).toHaveURL(/\/documents\/[^/]+$/);
+
     expect(consoleErrors.filter(e => e.includes('TypeError'))).toHaveLength(0);
   });
 
