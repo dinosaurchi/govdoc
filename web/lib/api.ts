@@ -1,5 +1,5 @@
-export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/v1';
+/** Same-origin `/api/v1` works with Next rewrites (local dev + docker). */
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
 
 function formatErrorPayload(body: unknown): string {
   if (body && typeof body === 'object' && 'detail' in body) {

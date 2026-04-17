@@ -1,0 +1,9 @@
+# Slim install for Docker images (no pytest; keep httpx for health checks if needed)
+fastapi
+uvicorn
+sqlalchemy
+pydantic
+pydantic-settings
+python-multipart
+alembic
+httpx
