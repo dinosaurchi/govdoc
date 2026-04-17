@@ -2,7 +2,7 @@
 
 **Branch under test:** `chi/implement-core-logic`
 **Author:** Claude (post code-fix pass)
-**Stack state when writing:** `make up` stack healthy; backend API hero flow fully verified via curl.
+**Stack state when writing:** `make up` stack healthy; backend API hero flow fully verified via curl with live Model Studio (Qwen). Mock providers have been removed — live credentials are now required to run the stack.
 
 This document lists **what still needs human QA** after the automated tests and backend smoke tests that Claude already ran. Use it as a checklist: each scenario has a preconditions block, a step list, and explicit pass/fail criteria.
 
@@ -13,11 +13,13 @@ This document lists **what still needs human QA** after the automated tests and 
 These were verified during the fix pass and are green:
 
 - [x] `make ci` — 202 tests pass, docker images build.
-- [x] Backend API hero flow via curl (upload → analyzed → routed → under_review → in_consultation → under_review → closed).
+- [x] Backend API hero flow via curl **with live Qwen** (upload → analyzed → routed → under_review → approved → closed); all `AIAnalysis.source == "live"`.
 - [x] RBAC matrix (intake_clerk close → 403, missing role → 400, ghost role → 403, demo/reset reviewer → 403, supervisor → 200).
 - [x] Out-of-scope branch via API (`POST /mark-out-of-scope`).
 - [x] Per-stage idempotent re-analyze (`POST /documents/{id}/analyze` returns cached 3 stages).
 - [x] Prompt versions are real SHA-256[:12] hashes on live intake (was `"unknown"` before the fix).
+- [x] Mock providers deleted; fail-fast verified (stripping `MODELSTUDIO_API_KEY` raises `ValueError` immediately on startup).
+- [x] Retrieval service wired to live `text-embedding-v4` embed function via `RealAIProvider`.
 
 If any of the above regress, the fix pass broke something; investigate first before proceeding with the sections below.
 
@@ -189,36 +191,31 @@ If the document detail page has an "Evidence" tab or panel, click it as **Review
 - No crash when `results` is `[]`.
 
 ### 6.3 Retrieval with live embeddings
-**Not covered** — the retrieval service is wired to `MockAIProvider.embed`. To test with real `text-embedding-v4`, the code would need to be rewired (out of scope for this QA pass).
+The retrieval service is now wired to `RealAIProvider.embed` (`text-embedding-v4`). Semantic search will fire when a non-empty reference corpus is loaded. For an empty corpus (the default out-of-the-box), `/evidence` returns `{"results": []}` which is correct.
 
 ---
 
-## 7 — Real Model Studio path (live API — requires credentials)
+## 7 — Real Model Studio path (live API — **now the default**)
 
-All Claude-verified runs used `MockAIProvider`. The real Qwen integration needs credentials.
+Live Model Studio is **required** — there is no mock fallback. Credentials are loaded from `.env` (created from `.secrets/*.csv`). The stack refuses to start without them.
 
 ### 7.1 Credential probe
 ```bash
-# Set env vars first
-export MODELSTUDIO_API_KEY="sk-..."
-export MODELSTUDIO_BASE_URL="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-export MODELSTUDIO_DASHSCOPE_URL="https://dashscope-intl.aliyuncs.com/api/v1"
-
 make check-credentials   # runs the `creds` marker tests
 ```
 **Expected:** Each of the 5 locked models (qwen-plus, qwen-max, qwen-vl-plus, text-embedding-v4, qwen3-rerank) returns a 200 within the probe timeout.
-**Failure mode:** If any single model fails, the whole probe should fail loudly (per the "fail fast" rule in `CLAUDE.md`). Do not proceed to §7.2 if this fails.
+**Failure mode:** If any model fails, the probe fails loudly. Fix the credential or model endpoint before continuing.
 
 ### 7.2 Live intake with real Qwen
+Already verified by Claude during the fix pass:
+- Full pipeline (classify → summarize → route → optional escalate) using live Qwen.
+- `AIAnalysis.source == "live"` for all rows.
+- Vietnamese output is semantically correct (e.g., "UBND" extracted as issuing agency, `phong_hanh_chinh` correctly routed with Vietnamese rationale).
+
+To re-verify independently:
 ```bash
-# Restart stack with credentials in the environment
-docker compose down && docker compose up -d --build
 make test-ai   # runs `live` + `live_integration` markers
 ```
-**Expected:**
-- `test-ai` target produces a full pipeline run (classify + summarize + route + optional escalate) using real Qwen.
-- `AIAnalysis.source` column records `"live"` for all rows.
-- Vietnamese output looks sensible (not garbled), urgency and classification are plausible for the sample content.
 
 ### 7.3 UI parity check
 Upload the same sample via the browser after enabling live mode. Confirm the classification / summary / routing suggestion visible on the detail page matches (or at least is semantically equivalent to) the raw API output.
@@ -347,7 +344,7 @@ If you only have an hour, do these in this order:
 3. **§11 Audit trail** (easy win, sells the demo story) — 10 min
 4. **§5 Demo scenarios** (if you plan to showcase seeded cases) — 10 min
 5. **§3.1–3.3 Error paths** (quick sanity checks) — 10 min
-6. **§7 Live Model Studio** (only if credentials available) — 15 min+
+6. **§7 Live Model Studio** (now the default; credentials pre-loaded in `.env`) — already verified, re-run `make test-ai` if needed
 
 Skip §8 OCR, §10 remote deploy, and §6 evidence panel unless the demo narrative specifically features them.
 
@@ -408,3 +405,10 @@ When you run QA, record findings in the same `docs/qa-report/` directory with fi
 | `api/app/api/v1/endpoints/documents.py` + `api/app/services/intake_service.py` | Thread `request.app.state.prompt_registry` into intake + re_analyze | Live intake was stamping `"unknown"` prompt_version |
 | `api/app/services/ai/analysis_service.py` | Per-stage idempotency (check each stage's current prompt_version) | Old all-or-nothing check gated on classify's version |
 | `api/app/api/v1/endpoints/review.py` + `api/app/schemas/document.py` | Added `response_model` on all workflow endpoints; introduced `WorkflowActionResponse` / `RoutingActionResponse` / `ConsultationActionResponse` | Endpoints were returning `{}` due to missing response_model on ORM returns |
+| `api/app/services/ai/mock_provider.py`, `.../extraction/mock_provider.py`, `.../retrieval/mock_provider.py` | **Deleted** | No fallback — real provider is mandatory |
+| `api/app/api/deps.py` | `get_ai_provider()` returns `RealAIProvider()` unconditionally; removed `get_extraction_provider` / `get_retrieval_provider` stubs | Fail fast per CLAUDE.md |
+| `api/app/api/v1/endpoints/documents.py` | Removed `_get_ai_provider()` with silent except; AI provider now via `Depends(deps.get_ai_provider)` | Allows test DI override without production fallback |
+| `api/app/main.py` | `settings.validate_ai_config()` at lifespan startup; retrieval wired to `RealAIProvider().embed` | Fail fast; live `text-embedding-v4` for semantic search |
+| `docker-compose.yml` | `env_file: .env`; removed `MODELSTUDIO_*=${...:-}` placeholders | Credentials flow from `.env` into container |
+| `.env` | Created from `.secrets/*.csv` with live Model Studio credentials | Gitignored; source of truth for local + docker dev |
+| `api/tests/conftest.py` + `api/tests/fixtures/fake_ai_provider.py` | Test-scoped `FakeAIProvider`; autouse fixture overrides `get_ai_provider` dep + stubs lifespan | Tests run offline without hitting Model Studio |
