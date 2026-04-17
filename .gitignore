@@ -22,3 +22,4 @@ web/dist/
 web/test-results
 test-results/
 .ai/tmp
+api/data
