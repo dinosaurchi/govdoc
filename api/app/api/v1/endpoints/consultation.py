@@ -20,7 +20,7 @@ async def list_active_consultations(db: Session = Depends(deps.get_db)):
 
 @router.post("/{doc_id}/notes")
 async def add_consultation_note(
-    doc_id: int,
+    doc_id: str,
     body: ConsultationNoteBody,
     db: Session = Depends(deps.get_db),
     role: str = Depends(deps.get_current_role),
@@ -35,7 +35,7 @@ async def add_consultation_note(
 
 @router.post("/{doc_id}/complete")
 async def complete_consultation(
-    doc_id: int,
+    doc_id: str,
     db: Session = Depends(deps.get_db),
     role: str = Depends(deps.get_current_role),
 ):

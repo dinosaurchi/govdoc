@@ -1,5 +1,7 @@
+from typing import Any
+
 from app.repositories import document as doc_repo
-from app.models.document import WorkflowState
+from app.models.document import DocumentStatus
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
@@ -10,84 +12,86 @@ class WorkflowService:
     def __init__(self, db: Session):
         self.db = db
 
-    def ensure_transition_allowed(self, current_state: WorkflowState, next_state: WorkflowState) -> None:
+    def ensure_transition_allowed(self, current_status: DocumentStatus, next_status: DocumentStatus) -> None:
         """Public guard for endpoints that mutate state alongside other persistence."""
-        self._validate_transition(current_state, next_state)
+        self._validate_transition(current_status, next_status)
 
-    def _validate_transition(self, current_state: WorkflowState, next_state: WorkflowState):
+    def _validate_transition(self, current_status: DocumentStatus, next_status: DocumentStatus):
         allowed_transitions = {
-            WorkflowState.intake_received: [
-                WorkflowState.registered,
-                WorkflowState.routed_pending_human_review,
-                WorkflowState.archived_demo_only,
+            DocumentStatus.received: [
+                DocumentStatus.extracted,
+                DocumentStatus.ingest_failed,
             ],
-            WorkflowState.registered: [
-                WorkflowState.routed_pending_human_review,
-                WorkflowState.assigned_to_department,
+            DocumentStatus.extracted: [
+                DocumentStatus.analyzed,
+                DocumentStatus.ingest_failed,
             ],
-            WorkflowState.routed_pending_human_review: [
-                WorkflowState.assigned_to_department,
-                WorkflowState.registered,
+            DocumentStatus.analyzed: [
+                DocumentStatus.routed,
+                DocumentStatus.analysis_failed,
             ],
-            WorkflowState.assigned_to_department: [WorkflowState.under_review],
-            WorkflowState.under_review: [
-                WorkflowState.consultation_requested,
-                WorkflowState.response_prepared,
+            DocumentStatus.routed: [
+                DocumentStatus.under_review,
+                DocumentStatus.out_of_scope,
             ],
-            WorkflowState.consultation_requested: [
-                WorkflowState.consultation_completed,
-                WorkflowState.under_review,
+            DocumentStatus.under_review: [
+                DocumentStatus.in_consultation,
+                DocumentStatus.approved,
             ],
-            WorkflowState.consultation_completed: [
-                WorkflowState.under_review,
-                WorkflowState.response_prepared,
+            DocumentStatus.in_consultation: [
+                DocumentStatus.under_review,
+                DocumentStatus.approved,
             ],
-            WorkflowState.response_prepared: [WorkflowState.closed, WorkflowState.under_review],
-            WorkflowState.closed: [WorkflowState.archived_demo_only],
-            WorkflowState.archived_demo_only: [],
+            DocumentStatus.approved: [DocumentStatus.closed],
+            DocumentStatus.closed: [],
+            DocumentStatus.out_of_scope: [],
+            DocumentStatus.ingest_failed: [],
+            DocumentStatus.analysis_failed: [],
         }
 
-        if next_state not in allowed_transitions.get(current_state, []):
+        if next_status not in allowed_transitions.get(current_status, []):
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid state transition from {current_state.value} to {next_state.value}",
+                detail=f"Invalid state transition from {current_status.value} to {next_status.value}",
             )
 
     async def transition_state(
         self,
-        document_id: int,
-        next_state: WorkflowState,
-        actor_role_id: int,
+        document_id: str,
+        next_status: DocumentStatus,
+        actor_role: str,
         *,
-        action: str = "WORKFLOW_TRANSITION",
-        extra_details: dict | None = None,
+        event_type: str = "WORKFLOW_TRANSITION",
+        metadata_json: dict[str, Any] | None = None,
     ):
         doc = doc_repo.document.get(self.db, id=document_id)
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
 
-        old_state = doc.state
-        self._validate_transition(old_state, next_state)
+        old_status = doc.status
+        self._validate_transition(old_status, next_status)
 
-        doc.state = next_state
+        doc.status = next_status
         self.db.add(doc)
         self.db.commit()
         self.db.refresh(doc)
 
-        details = {"old_state": old_state.value, "new_state": next_state.value}
-        if extra_details:
-            details.update(extra_details)
+        meta: dict[str, Any] = {"old_status": old_status.value, "new_status": next_status.value}
+        if metadata_json:
+            meta.update(metadata_json)
 
         write_audit_event(
             self.db,
             document_id=document_id,
-            actor_role_id=actor_role_id,
-            action=action,
-            details=details,
+            actor_role=actor_role,
+            event_type=event_type,
+            from_state=old_status.value,
+            to_state=next_status.value,
+            metadata_json=meta,
         )
         return doc
 
-    async def add_consultation(self, document_id: int, author_role_id: int, content: str):
+    async def add_consultation(self, document_id: str, author_role: str, body: str):
         doc = doc_repo.document.get(self.db, id=document_id)
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
@@ -96,73 +100,73 @@ class WorkflowService:
             self.db,
             obj_in={
                 "document_id": document_id,
-                "author_role_id": author_role_id,
-                "content": content,
+                "author_role": author_role,
+                "body": body,
             },
         )
 
         write_audit_event(
             self.db,
             document_id=document_id,
-            actor_role_id=author_role_id,
-            action="CONSULTATION_NOTE_CREATED",
-            details={"note_id": note.id},
+            actor_role=author_role,
+            event_type="CONSULTATION_NOTE_CREATED",
+            metadata_json={"note_id": note.id},
         )
 
         doc = doc_repo.document.get(self.db, id=document_id)
-        if doc and doc.state == WorkflowState.under_review:
+        if doc and doc.status == DocumentStatus.under_review:
             await self.transition_state(
                 document_id,
-                WorkflowState.consultation_requested,
-                author_role_id,
-                action="CONSULTATION_REQUESTED",
+                DocumentStatus.in_consultation,
+                author_role,
+                event_type="CONSULTATION_REQUESTED",
             )
 
         return note
 
-    async def complete_consultation(self, document_id: int, actor_role_id: int):
+    async def complete_consultation(self, document_id: str, actor_role: str):
         return await self.transition_state(
             document_id,
-            WorkflowState.consultation_completed,
-            actor_role_id,
-            action="CONSULTATION_COMPLETED",
+            DocumentStatus.under_review,
+            actor_role,
+            event_type="CONSULTATION_COMPLETED",
         )
 
     async def create_routing_decision(
-        self, document_id: int, assigned_by_id: int, target_dept_id: int, note: str
+        self,
+        document_id: str,
+        decided_by_role: str,
+        suggested_department_id: str | None,
+        final_department_id: str | None,
+        decision: str,
+        rationale: str | None = None,
     ):
         doc = doc_repo.document.get(self.db, id=document_id)
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
 
-        decision = doc_repo.routing_decision.create(
+        routing_decision = doc_repo.routing_decision.create(
             self.db,
             obj_in={
                 "document_id": document_id,
-                "assigned_by_id": assigned_by_id,
-                "target_department_id": target_dept_id,
-                "note": note or None,
+                "decided_by_role": decided_by_role,
+                "suggested_department_id": suggested_department_id,
+                "final_department_id": final_department_id,
+                "decision": decision,
+                "rationale": rationale,
             },
         )
 
         write_audit_event(
             self.db,
             document_id=document_id,
-            actor_role_id=assigned_by_id,
-            action="ROUTE",
-            details={
-                "routing_decision_id": decision.id,
-                "target_department_id": target_dept_id,
-                "note": note or "",
+            actor_role=decided_by_role,
+            event_type="ROUTE",
+            metadata_json={
+                "routing_decision_id": routing_decision.id,
+                "suggested_department_id": suggested_department_id,
+                "rationale": rationale or "",
             },
         )
 
-        await self.transition_state(
-            document_id,
-            WorkflowState.assigned_to_department,
-            assigned_by_id,
-            action="ROUTE_APPROVED",
-            extra_details={"routing_decision_id": decision.id},
-        )
-
-        return decision
+        return routing_decision

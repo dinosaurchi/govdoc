@@ -14,9 +14,11 @@ from app.core.config import settings
 from app.models.document import (
     Document,
     DocumentFile,
-    DocumentType,
+    DocumentStatus,
+    ExtractionMethod,
     ExtractedArtifact,
-    WorkflowState,
+    SecurityLevel,
+    Urgency,
 )
 from app.services.audit_service import write_audit_event
 from app.services.extraction.interface import ExtractionProviderInterface
@@ -32,7 +34,6 @@ async def process_document_upload(
     *,
     upload: UploadFile,
     title: str | None,
-    doc_type: DocumentType,
     role_name: str,
     extractor: ExtractionProviderInterface,
 ) -> Document:
@@ -61,8 +62,9 @@ async def process_document_upload(
     doc_title = (title or "").strip() or _safe_filename(upload.filename)
     doc = Document(
         title=doc_title,
-        doc_type=doc_type,
-        state=WorkflowState.intake_received,
+        status=DocumentStatus.received,
+        security_level=SecurityLevel.unclassified,
+        urgency=Urgency.normal,
     )
     db.add(doc)
     db.flush()
@@ -72,8 +74,8 @@ async def process_document_upload(
     dest_dir = root / str(doc.id)
     dest_dir.mkdir(parents=True, exist_ok=True)
     safe_name = _safe_filename(upload.filename)
-    storage_rel = str(Path(str(doc.id)) / safe_name)
-    abs_path = root / storage_rel
+    storage_key = str(Path(str(doc.id)) / safe_name)
+    abs_path = root / storage_key
 
     with open(abs_path, "wb") as f:
         f.write(body)
@@ -82,43 +84,35 @@ async def process_document_upload(
 
     dfile = DocumentFile(
         document_id=doc.id,
-        file_name=safe_name,
+        storage_key=storage_key,
+        original_filename=safe_name,
         mime_type=mime,
-        file_size_bytes=size,
-        storage_relative_path=storage_rel,
-        sha256_hex=sha,
+        size_bytes=size,
+        sha256=sha,
     )
     db.add(dfile)
     db.flush()
 
     extracted_text = await extractor.extract_text(str(abs_path))
-    structured = await extractor.extract_structured_data(str(abs_path))
-    src = getattr(type(extractor), "source_label", None) or getattr(
-        extractor, "source_label", None
-    )
-    source_label = src or type(extractor).__name__
 
     artifact = ExtractedArtifact(
         document_id=doc.id,
-        document_file_id=dfile.id,
-        extraction_method="mock_deterministic",
-        extraction_source_label=source_label,
-        extracted_text=extracted_text,
-        structured_metadata_json=structured,
+        extraction_method=ExtractionMethod.plaintext,
+        text=extracted_text,
     )
     db.add(artifact)
 
     write_audit_event(
         db,
         document_id=doc.id,
-        actor_role_id=actor_id,
-        action="INTAKE_UPLOAD",
-        details={
-            "file_name": safe_name,
+        actor_role=actor_id,
+        event_type="INTAKE_UPLOAD",
+        metadata_json={
+            "original_filename": safe_name,
             "mime_type": mime,
-            "bytes": size,
+            "size_bytes": size,
             "sha256": sha,
-            "extraction_method": "mock_deterministic",
+            "extraction_method": "plaintext",
         },
     )
 

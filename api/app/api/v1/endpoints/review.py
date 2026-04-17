@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.api import deps
 from app.api.role_util import get_role_id_by_name
-from app.models.document import WorkflowState
+from app.models.document import DocumentStatus
 from app.services.workflow import WorkflowService
 
 router = APIRouter()
@@ -11,8 +11,8 @@ router = APIRouter()
 
 @router.post("/{doc_id}/route")
 async def route_document(
-    doc_id: int,
-    target_dept_id: int,
+    doc_id: str,
+    target_dept_id: str,
     note: str = "",
     db: Session = Depends(deps.get_db),
     role: str = Depends(deps.get_current_role),
@@ -22,12 +22,14 @@ async def route_document(
 
     actor_id = get_role_id_by_name(db, role)
     workflow = WorkflowService(db)
-    return await workflow.create_routing_decision(doc_id, actor_id, target_dept_id, note)
+    return await workflow.create_routing_decision(
+        doc_id, actor_id, target_dept_id, target_dept_id, "accepted", note or None
+    )
 
 
 @router.post("/{doc_id}/start-review")
 async def start_department_review(
-    doc_id: int,
+    doc_id: str,
     db: Session = Depends(deps.get_db),
     role: str = Depends(deps.get_current_role),
 ):
@@ -38,15 +40,15 @@ async def start_department_review(
     workflow = WorkflowService(db)
     return await workflow.transition_state(
         doc_id,
-        WorkflowState.under_review,
+        DocumentStatus.under_review,
         actor_id,
-        action="REVIEW_STARTED",
+        event_type="REVIEW_STARTED",
     )
 
 
 @router.post("/{doc_id}/prepare-response")
 async def prepare_response(
-    doc_id: int,
+    doc_id: str,
     db: Session = Depends(deps.get_db),
     role: str = Depends(deps.get_current_role),
 ):
@@ -57,15 +59,15 @@ async def prepare_response(
     workflow = WorkflowService(db)
     return await workflow.transition_state(
         doc_id,
-        WorkflowState.response_prepared,
+        DocumentStatus.approved,
         actor_id,
-        action="RESPONSE_PREPARED",
+        event_type="RESPONSE_PREPARED",
     )
 
 
 @router.post("/{doc_id}/approve")
 async def approve_document(
-    doc_id: int,
+    doc_id: str,
     db: Session = Depends(deps.get_db),
     role: str = Depends(deps.get_current_role),
 ):
@@ -76,7 +78,7 @@ async def approve_document(
     workflow = WorkflowService(db)
     return await workflow.transition_state(
         doc_id,
-        WorkflowState.closed,
+        DocumentStatus.closed,
         actor_id,
-        action="CLOSE_APPROVED",
+        event_type="CLOSE_APPROVED",
     )
