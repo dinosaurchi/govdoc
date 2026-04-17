@@ -1,13 +1,22 @@
 # GovDoc SecureFlow — Multi-Pass Implementation Plan
 
-Version: 1.1  
+Version: 1.1.1  
 Status: Implementation handoff note  
 Primary input: `govdoc_source_of_truth_plan_v1_1.md`  
 Scope: turn the existing Google AI Studio baseline (real frontend + backend, mocked business logic) into a real, testable MVP with Alibaba Model Studio integration, demo mode, and deterministic QA/deployment paths.
 
+Changelog since 1.1:
+- Corrected §3.1 runtime to Python 3.12 (matches the repo Dockerfile `python:3.12-alpine`).
+- Rewrote §5.1 `make check-credentials` to defer to the locked 5-model probe contract in §17.7 (removed "optional qwen-max" language).
+- Added §3.4 Workflow-state ↔ `document.status` mapping.
+- Expanded §15 item 11 to list `make check-credentials`, `make test-ai`, and `make test-e2e` alongside the other required targets.
+- Resolved `prompt_version` primary-key ambiguity: composite PK `(id, stage)` where `id` is the SHA-256[:12] of the prompt file bytes (§17.10, Pass 1 entity schema).
+- Pinned `POST /documents/{id}/analyze` idempotency: if an `ai_analysis` row already exists for the `(document_id, active prompt_version)` pair, return it without calling the model (§Pass 6 endpoint inventory).
+- Normalized all `config/models.yaml` / `config/prompt_versions.yaml` references to `api/config/...` (§6.1 note, §17.2, §17.10).
+
 Changelog since 1.0:
 - Locked the stack (§3.1), role simulation contract (§3.2), and synchronous pipeline model (§3.3).
-- Dropped `MODEL_*` env vars; models live only in `config/models.yaml`. Added `MODELSTUDIO_DASHSCOPE_URL`, `MODELS_CONFIG_PATH`, `ROLES_CONFIG_PATH`, `CACHED_AI_STORAGE_ROOT` (§6.1).
+- Dropped `MODEL_*` env vars; models live only in `api/config/models.yaml`. Added `MODELSTUDIO_DASHSCOPE_URL`, `MODELS_CONFIG_PATH`, `ROLES_CONFIG_PATH`, `CACHED_AI_STORAGE_ROOT` (§6.1).
 - Added entity field schema (Pass 1) and API endpoint inventory (Pass 6).
 - Clarified `extraction_method` values (§17.4), locked credential-check return keys (§17.7), split integration marker into `mock_integration` / `live_integration` (§17.9).
 - Added prompt versioning scheme (§17.10), cached AI storage layout (§17.11), fence-stripping helper contract (§17.12).
@@ -83,7 +92,7 @@ If the baseline diverges materially from the source-of-truth structure, fix the 
 The stack is fixed for this phase. Do not introduce alternatives.
 
 **Backend (`api/`)**
-- Python 3.11
+- Python 3.12 (matches `deploy/api.Dockerfile` base image)
 - FastAPI (ASGI via uvicorn)
 - SQLAlchemy 2.x + Alembic (migrations)
 - SQLite, single file at `data/govdoc.db` (WAL mode)
@@ -121,8 +130,27 @@ The stack is fixed for this phase. Do not introduce alternatives.
 - AI analysis is **synchronous** for MVP.
 - Upload flow: `POST /documents` persists the raw file and `document` row, then (in the same request) runs deterministic extraction and the AI analysis pipeline, then returns the created `document` + `ai_analysis` payload.
 - On any pipeline failure, the request returns non-2xx with an explicit error class and the document is marked `status="ingest_failed"`; no partial success is reported as success.
-- Re-analysis is triggered by explicit `POST /documents/{id}/analyze` (idempotent per prompt version).
+- Re-analysis is triggered by explicit `POST /documents/{id}/analyze` (idempotent per prompt version — see Pass 6 endpoint inventory).
 - No background worker, no task queue, no Celery/RQ in this phase.
+
+### 3.4 Workflow-state ↔ `document.status` mapping
+
+The source-of-truth workflow (`intake → registration → distribution → review → consultation → response`) maps to the `document.status` enum in §Pass 1 entity schema as follows. The workflow label is the user-facing stage; the status is the persisted value used by the state machine and audit log.
+
+| Workflow stage | `document.status` | Entered by |
+|---|---|---|
+| intake (just uploaded) | `received` | `POST /documents` success (before extraction) |
+| extraction done | `extracted` | deterministic extractor completes |
+| AI analysis done | `analyzed` | `POST /documents` / `POST /documents/{id}/analyze` success |
+| registration / distribution | `routed` | `POST /documents/{id}/approve-routing` or `.../reroute` |
+| review | `under_review` | reviewer opens record (implicit on read by reviewer role) or explicit claim action |
+| consultation | `in_consultation` | `POST /documents/{id}/request-consultation` |
+| response / closeout | `approved` then `closed` | `POST /documents/{id}/close` (via approved) |
+| out-of-scope branch | `out_of_scope` | `POST /documents/{id}/mark-out-of-scope` |
+| intake pipeline error | `ingest_failed` | extraction or storage failure in `POST /documents` |
+| analysis pipeline error | `analysis_failed` | AI adapter raises after extraction succeeded |
+
+Transitions not listed above are invalid and must be rejected with `INVALID_TRANSITION`. The state machine is the single source of truth for allowed moves; UI must not perform implicit transitions client-side.
 
 ---
 
@@ -190,12 +218,7 @@ Run:
 Fail immediately on first failing stage.
 
 #### `make check-credentials`
-Explicitly validate Model Studio credentials and required model availability:
-- simple `qwen-plus` generation call
-- embedding call
-- OCR call using a bundled small scan fixture
-- optional `qwen-max` availability check if configured as enabled
-Return non-zero on any failure.
+Explicitly validate Model Studio credentials and required model availability by running the locked 5-model live probe defined in §17.7. All five probes (`classify`, `escalate`, `embed`, `ocr`, `rerank`) are mandatory; none are optional. Returns non-zero if any probe fails or if any required env var is missing.
 
 #### `make up`
 Run docker-compose locally and block on health checks.
@@ -242,7 +265,7 @@ At minimum:
 - `REMOTE_USER`
 - `REMOTE_APP_DIR`
 
-**Model names are not env vars.** All model ids live in `config/models.yaml` (see §17.2/§17.6). This keeps the model → role mapping in one place and prevents env drift.
+**Model names are not env vars.** All model ids live in `api/config/models.yaml` (see §17.2/§17.6). This keeps the model → role mapping in one place and prevents env drift.
 
 ### 6.2 Fail-fast configuration rules
 
@@ -426,12 +449,14 @@ All entities use UUID string primary keys (`id`) and timestamptz `created_at` / 
 - `name: str`
 - `description: str | None`
 
-**prompt_version** (registry)
-- `id: str` (short SHA-256 hash, see §17.10)
+**prompt_version** (registry, composite primary key `(id, stage)`)
+- `id: str` — first 12 hex chars of SHA-256 of prompt file bytes (see §17.10)
 - `stage: enum(classify, summarize, route, escalate)`
 - `file_path: str`
 - `label: str | None`
 - `registered_at: datetime`
+
+The composite key exists because two stages could theoretically share identical file bytes (hash collision in content), and we want stage-scoped uniqueness. In practice this is rare, but it lets `ai_analysis.prompt_version` + `ai_analysis.stage` unambiguously identify the prompt used.
 
 **demo_scenario** (seeded)
 - `id: str`
@@ -625,7 +650,7 @@ All protected endpoints require `X-GovDoc-Role`. Responses are JSON; errors are 
 - `GET /documents` — list with filters (`status`, `department`, `q`, `scenario`)
 - `GET /documents/{id}` — full record (document + files + artifact + analysis + routing + consultation + audit)
 - `GET /documents/{id}/file` — raw file stream
-- `POST /documents/{id}/analyze` — force re-run analysis (supervisor only)
+- `POST /documents/{id}/analyze` — re-run analysis (supervisor only). **Idempotency rule:** if an `ai_analysis` row already exists for this `document_id` at the currently-active `prompt_version` (for each relevant stage), return the existing rows without calling the model. Only stages whose prompt hash differs from the recorded one are re-run. A `force=true` query param bypasses the cache and always calls the model, writing a new `ai_analysis` row (old rows are retained).
 
 **Workflow actions**
 - `POST /documents/{id}/approve-routing` — reviewer/supervisor
@@ -875,7 +900,7 @@ The implementation is complete only when all of the following are true:
 8. OCR path works for seeded scan scenarios
 9. review/consultation/closeout workflow is real
 10. evidence panel is real enough to support demo credibility
-11. `make lint`, `make build`, `make test`, `make ci`, `make up`, `make qa`, and `make up-remote` all exist and behave deterministically
+11. `make lint`, `make build`, `make test`, `make ci`, `make up`, `make qa`, `make check-credentials`, `make test-ai`, `make test-e2e`, and `make up-remote` all exist and behave deterministically (CI-safe targets never require live credentials; live targets fail fast if credentials are missing)
 12. local and remote deployment fail fast on missing config or bad health state
 13. no hidden-error or fake-success behavior remains in normal mode
 14. the repo is ready for paired verification through the dedicated test plan
@@ -941,7 +966,7 @@ URL format example (workspace-specific):
 
 **Important**: `gte-rerank-v2` is NOT available on workspace endpoints. Use `qwen3-rerank`.
 
-Store model names in a `config/models.yaml` file, not hardcoded in source. Load them at runtime from config.
+Store model names in `api/config/models.yaml`, not hardcoded in source. Load them at runtime from config.
 
 ---
 
@@ -1237,11 +1262,12 @@ All AI adapter tests must use markers consistent with the reference pattern:
 ### 17.10 Prompt versioning scheme
 
 - Prompt files live in `api/prompts/*.txt` and are loaded at process startup.
-- The canonical `prompt_version` is the first **12 hex chars** of the SHA-256 of the raw file bytes (no whitespace trimming).
-- On startup, `PromptRegistry` scans the prompt directory, computes each hash, and upserts a row into the `prompt_version` table for each (stage, hash) pair.
-- Every `ai_analysis` row stores the active `prompt_version` used for that call.
-- Optional human-readable labels live in `config/prompt_versions.yaml` (hash → label). Labels are informational only; the hash is the source of truth.
-- Changing a prompt file produces a new version id; old analyses remain queryable by their original version.
+- The canonical `prompt_version.id` is the first **12 hex chars** of the SHA-256 of the raw file bytes (no whitespace trimming).
+- The `prompt_version` table uses a composite primary key `(id, stage)` — see Pass 1 entity schema. The stage is derived from the file name (`classify.txt` → `stage="classify"`, etc.).
+- On startup, `PromptRegistry` scans `api/prompts/`, computes each hash, and upserts a row for each `(id, stage)` pair.
+- Every `ai_analysis` row stores `(prompt_version, stage)` as a foreign key pair into the registry.
+- Optional human-readable labels live in `api/config/prompt_versions.yaml` (keyed by `{stage}/{id}` → label). Labels are informational only; the hash is the source of truth.
+- Changing a prompt file produces a new `id` for that stage; old analyses remain queryable by their original `(id, stage)`.
 
 ---
 

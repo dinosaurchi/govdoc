@@ -1,9 +1,12 @@
 # GovDoc SecureFlow — Multi-Pass Test Plan
 
-Version: 1.1  
+Version: 1.1.1  
 Status: Verification handoff note  
 Primary input: `govdoc_source_of_truth_plan_v1_1.md`  
-Paired with: `govdoc_implementation_plan.md` (v1.1)
+Paired with: `govdoc_implementation_plan.md` (v1.1.1)
+
+Changelog since 1.1:
+- Rewrote §4.1 `make check-credentials` to match the locked 5-mandatory-model probe contract in implementation plan §17.7 (removed "optional escalate").
 
 Changelog since 1.0:
 - Committed to Playwright (removed "or equivalent").
@@ -151,13 +154,14 @@ Must run:
 Must not require live Model Studio credentials.
 
 #### `make check-credentials`
-Must verify:
-- base URL reachable
-- API key valid
-- `qwen-plus` usable
-- OCR model usable
-- embedding model usable
-- optional escalate model usable if configured
+Must verify, per the locked 5-model probe contract in implementation plan §17.7, that all of the following succeed (all are mandatory; none are optional):
+- `qwen-plus (classify)` — short generation call
+- `qwen-max (escalate)` — short generation call
+- `text-embedding-v4 (embed)` — embedding call on a trivial input
+- `qwen-vl-plus (ocr)` — OCR call on the bundled 1×1 white PNG fixture
+- `qwen3-rerank (rerank)` — rerank call with a single document on the DashScope endpoint
+
+Env validation (`MODELSTUDIO_API_KEY`, `MODELSTUDIO_BASE_URL`, `MODELSTUDIO_DASHSCOPE_URL`) runs first; missing or empty values fail before any HTTP call is made.
 
 #### `make test-ai`
 Must run live AI quality evaluation against the bundled data pack and produce machine-readable results.
