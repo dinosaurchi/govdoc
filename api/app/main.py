@@ -1,8 +1,9 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app.api.v1 import api_router
@@ -10,7 +11,9 @@ from app.core.config import settings
 from app.core.config_loader import load_prompt_versions_config
 from app.db.session import SessionLocal
 from app.services.demo import seed_all
+from app.services.file_validation import FileValidationError
 from app.services.prompt_registry import PromptRegistry
+from app.services.workflow import InvalidTransitionError
 
 # Resolve paths relative to the project root regardless of CWD
 # main.py is at: api/app/main.py  → 2 parents up = api/ , 3 = project root
@@ -51,6 +54,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(FileValidationError)
+async def file_validation_error_handler(request: Request, exc: FileValidationError):
+    return JSONResponse(
+        status_code=400,
+        content={"error": {"code": exc.code, "message": exc.message, "details": {}}},
+    )
+
+
+@app.exception_handler(InvalidTransitionError)
+async def invalid_transition_error_handler(request: Request, exc: InvalidTransitionError):
+    return JSONResponse(
+        status_code=400,
+        content={"error": {"code": "INVALID_TRANSITION", "message": str(exc), "details": {}}},
+    )
+
+
+@app.exception_handler(Exception)
+async def generic_error_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={"error": {"code": "PERSISTENCE_FAILED", "message": str(exc), "details": {}}},
+    )
 
 
 @app.get("/healthz")

@@ -1,113 +1,214 @@
-from pydantic import BaseModel, ConfigDict
+from __future__ import annotations
+
+from pydantic import BaseModel
 from datetime import datetime
-from typing import List, Optional, Any
-
-from app.models.document import DocumentStatus, SecurityLevel, Urgency
+from typing import Any
 
 
-class DocumentBase(BaseModel):
+# Enums for schemas
+class DocumentStatusSchema(str):
+    received = "received"
+    extracted = "extracted"
+    analyzed = "analyzed"
+    routed = "routed"
+    under_review = "under_review"
+    in_consultation = "in_consultation"
+    approved = "approved"
+    closed = "closed"
+    out_of_scope = "out_of_scope"
+    ingest_failed = "ingest_failed"
+    analysis_failed = "analysis_failed"
+
+
+class SecurityLevelSchema(str):
+    unclassified = "unclassified"
+    confidential = "confidential"
+    secret = "secret"
+    top_secret = "top_secret"
+
+
+class UrgencySchema(str):
+    normal = "normal"
+    urgent = "urgent"
+    critical = "critical"
+
+
+class ExtractionMethodSchema(str):
+    pypdf = "pypdf"
+    render_ocr = "render_ocr"
+    qwen_ocr = "qwen-ocr"
+    docx = "docx"
+    plaintext = "plaintext"
+
+
+class AnalysisStageSchema(str):
+    classify = "classify"
+    summarize = "summarize"
+    route = "route"
+    escalate = "escalate"
+
+
+class AnalysisSourceSchema(str):
+    live = "live"
+    cached = "cached"
+
+
+class RoutingDecisionTypeSchema(str):
+    accepted = "accepted"
+    rerouted = "rerouted"
+    escalated = "escalated"
+    out_of_scope = "out_of_scope"
+
+
+# Document schemas
+class DocumentCreate(BaseModel):
     title: str
 
 
-class DocumentCreate(DocumentBase):
-    doc_number: Optional[str] = None
-    issuing_agency: Optional[str] = None
-    security_level: SecurityLevel = SecurityLevel.unclassified
-    urgency: Urgency = Urgency.normal
+class DocumentOut(BaseModel):
+    id: str
+    title: str
+    doc_number: str | None = None
+    issuing_agency: str | None = None
+    received_at: datetime
+    status: str
+    security_level: str
+    urgency: str
+    assigned_department_id: str | None = None
+    assigned_reviewer_role: str | None = None
+    current_prompt_version: str | None = None
+    notes: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class DocumentListOut(BaseModel):
+    id: str
+    title: str
+    doc_number: str | None = None
+    status: str
+    security_level: str
+    urgency: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class DocumentFilters(BaseModel):
+    status: str | None = None
+    department_id: str | None = None
+    q: str | None = None
+    scenario: str | None = None
 
 
 class DocumentFileOut(BaseModel):
     id: str
+    document_id: str
     storage_key: str
     original_filename: str
     mime_type: str
     size_bytes: int
     sha256: str
-    is_primary: bool = True
+    is_primary: bool
     created_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    class Config:
+        from_attributes = True
 
 
 class ExtractedArtifactOut(BaseModel):
     id: str
+    document_id: str
     extraction_method: str
     text: str
-    page_count: int = 1
-    warnings: Optional[list[str]] = None
+    page_count: int
+    warnings: list[str] = []
     extracted_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    class Config:
+        from_attributes = True
 
 
 class AIAnalysisOut(BaseModel):
     id: str
+    document_id: str
     stage: str
     model_name: str
     prompt_version: str
     source: str
-    payload_json: Any
-    confidence: Optional[float] = None
+    payload_json: dict[str, Any]
+    confidence: float | None = None
     created_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    class Config:
+        from_attributes = True
 
 
 class RoutingDecisionOut(BaseModel):
     id: str
-    suggested_department_id: Optional[str] = None
-    final_department_id: Optional[str] = None
-    decided_by_role: Optional[str] = None
+    document_id: str
+    suggested_department_id: str | None = None
+    final_department_id: str | None = None
+    decided_by_role: str | None = None
     decision: str
-    rationale: Optional[str] = None
+    rationale: str | None = None
     created_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    class Config:
+        from_attributes = True
 
 
 class ConsultationNoteOut(BaseModel):
     id: str
+    document_id: str
     author_role: str
-    target_role: Optional[str] = None
+    target_role: str | None = None
     body: str
-    resolved_at: Optional[datetime] = None
+    resolved_at: datetime | None = None
     created_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    class Config:
+        from_attributes = True
 
 
 class AuditEventOut(BaseModel):
     id: str
-    document_id: Optional[str] = None
-    actor_role: Optional[str] = None
+    document_id: str | None = None
+    actor_role: str | None = None
     event_type: str
-    from_state: Optional[str] = None
-    to_state: Optional[str] = None
-    metadata_json: Optional[dict[str, Any]] = None
+    from_state: str | None = None
+    to_state: str | None = None
+    metadata_json: dict[str, Any] = {}
     occurred_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    class Config:
+        from_attributes = True
 
 
-class DocumentOut(DocumentBase):
-    id: str
-    doc_number: Optional[str] = None
-    issuing_agency: Optional[str] = None
-    received_at: datetime
-    status: DocumentStatus
-    security_level: SecurityLevel
-    urgency: Urgency
-    assigned_department_id: Optional[str] = None
-    assigned_reviewer_role: Optional[str] = None
-    current_prompt_version: Optional[str] = None
-    notes: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
-    files: List[DocumentFileOut] = []
-    artifacts: List[ExtractedArtifactOut] = []
-    analyses: List[AIAnalysisOut] = []
-    routing_decisions: List[RoutingDecisionOut] = []
-    consultation_notes: List[ConsultationNoteOut] = []
-    audit_events: List[AuditEventOut] = []
+class DocumentDetailOut(DocumentOut):
+    files: list[DocumentFileOut] = []
+    artifacts: list[ExtractedArtifactOut] = []
+    analyses: list[AIAnalysisOut] = []
+    routing_decisions: list[RoutingDecisionOut] = []
+    consultation_notes: list[ConsultationNoteOut] = []
+    audit_events: list[AuditEventOut] = []
 
-    model_config = ConfigDict(from_attributes=True)
+
+class UploadResponse(BaseModel):
+    document: DocumentOut
+    extracted_artifact: ExtractedArtifactOut | None = None
+    ai_analyses: list[AIAnalysisOut] = []
+
+
+class RerouteRequest(BaseModel):
+    department_id: str
+    rationale: str | None = None
+
+
+class ConsultationRequest(BaseModel):
+    target_role: str
+    body: str
