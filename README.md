@@ -1,6 +1,6 @@
 # GovDoc SecureFlow
 
-Public-sector **incoming document intake and triage** baseline (GovDoc SecureFlow). This repo is a real Next.js + FastAPI + SQLite application with **mocked AI/extraction/retrieval** behind isolated service interfaces.
+Public-sector **incoming document intake and triage** baseline (GovDoc SecureFlow). This repo is a real Vite + React Router + FastAPI + SQLite application with **mocked AI/extraction/retrieval** behind isolated service interfaces.
 
 ## Pass status
 
@@ -10,7 +10,7 @@ Public-sector **incoming document intake and triage** baseline (GovDoc SecureFlo
 
 | Path | Role |
 |------|------|
-| `web/` | Next.js 15 (App Router) + TypeScript + Tailwind |
+| `web/` | Vite 6 + React Router v7 + TypeScript + Tailwind CSS v4 |
 | `api/` | FastAPI + SQLAlchemy + Alembic |
 | `deploy/` | Dockerfiles for `web` and `api` |
 | `scripts/` | `check_credentials`, `seed_demo_data`, `qa_local`, `remote_*`, compose health wait |
@@ -30,7 +30,7 @@ Public-sector **incoming document intake and triage** baseline (GovDoc SecureFlo
 3. Apply migrations: `make migrate`
 4. Run API + web together: `npm run dev` (from repo root; uses `concurrently`)
 
-API defaults to port **8000**, web to **3000**. The Next app rewrites `/api/*` to the FastAPI backend (`web/next.config.ts`).
+API defaults to port **8000**, web to **3000**. The Vite dev server proxies `/api/*` to the FastAPI backend (see `web/vite.config.ts`).
 
 ## Local development (Docker)
 

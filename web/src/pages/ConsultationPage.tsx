@@ -1,21 +1,17 @@
-'use client';
-
 import { useEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui-card';
 import { Badge } from '@/components/ui-badge';
-import { Send, User, MessageCircle, Loader2, Info } from 'lucide-react';
+import { Send, MessageCircle, Loader2, Info } from 'lucide-react';
 import { fetchApi } from '@/lib/api';
-import { useRole } from '@/hooks/use-role';
 
 type ConsultDoc = {
   id: number;
   title: string;
   state: string;
-  consultations: unknown[];
+  consultations: any[];
 };
 
 export default function ConsultationPage() {
-  const { role } = useRole();
   const [documents, setDocuments] = useState<ConsultDoc[]>([]);
   const [selectedDoc, setSelectedDoc] = useState<ConsultDoc | null>(null);
   const [loading, setLoading] = useState(true);
@@ -33,8 +29,6 @@ export default function ConsultationPage() {
       setSelectedDoc((prev: ConsultDoc | null) => prev ?? consultDocs[0] ?? null);
     } catch (err) {
       console.error(err);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -68,10 +62,9 @@ export default function ConsultationPage() {
     try {
       await fetchApi(`/consultation/${selectedDoc.id}/notes`, {
         method: 'POST',
-        body: JSON.stringify({ content: message })
+        body: JSON.stringify({ content: message }),
       });
       setMessage('');
-      // Refresh selected doc
       const updated = await fetchApi(`/documents/${selectedDoc.id}`);
       setSelectedDoc(updated);
       fetchConsultations();
@@ -97,9 +90,9 @@ export default function ConsultationPage() {
         <div className="lg:col-span-1 space-y-4">
           <h3 className="font-bold text-sm text-slate-400 uppercase tracking-widest pl-2">Active Requests</h3>
           {documents.length === 0 ? (
-             <div className="p-8 text-center bg-white border border-dashed rounded-2xl text-slate-400">
-                <p className="text-xs font-medium">No documents currently in consultation.</p>
-             </div>
+            <div className="p-8 text-center bg-white border border-dashed rounded-2xl text-slate-400">
+              <p className="text-xs font-medium">No documents currently in consultation.</p>
+            </div>
           ) : (
             documents.map((doc) => (
               <div
@@ -112,22 +105,22 @@ export default function ConsultationPage() {
                 onClick={() => setSelectedDoc(doc)}
                 className="rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-400"
               >
-              <Card 
-                className={`cursor-pointer transition-all ${selectedDoc?.id === doc.id ? 'border-blue-500 shadow-md ring-2 ring-blue-50' : 'hover:border-blue-200'}`}
-              >
-                <CardContent className="p-4 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Badge variant={doc.state === 'consultation_completed' ? 'secondary' : 'default'} className="scale-75 origin-left">
-                      {doc.state.replace(/_/g, ' ')}
-                    </Badge>
-                    <span className="text-[10px] font-mono text-slate-400">ID: {doc.id}</span>
-                  </div>
-                  <h4 className="font-bold text-slate-900 leading-tight truncate">{doc.title}</h4>
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                    <MessageCircle size={12} /> {doc.consultations.length} total notes
-                  </div>
-                </CardContent>
-              </Card>
+                <Card
+                  className={`cursor-pointer transition-all ${selectedDoc?.id === doc.id ? 'border-blue-500 shadow-md ring-2 ring-blue-50' : 'hover:border-blue-200'}`}
+                >
+                  <CardContent className="p-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Badge variant={doc.state === 'consultation_completed' ? 'secondary' : 'default'} className="scale-75 origin-left">
+                        {doc.state.replace(/_/g, ' ')}
+                      </Badge>
+                      <span className="text-[10px] font-mono text-slate-400">ID: {doc.id}</span>
+                    </div>
+                    <h4 className="font-bold text-slate-900 leading-tight truncate">{doc.title}</h4>
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                      <MessageCircle size={12} /> {doc.consultations.length} total notes
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
             ))
           )}
@@ -149,26 +142,25 @@ export default function ConsultationPage() {
                 </div>
               )}
               {selectedDoc.consultations.map((note: any) => (
-                <ChatMessage 
-                  key={note.id} 
-                  sender={`Role ID: ${note.author_role_id}`} 
-                  message={note.content} 
-                  time={new Date(note.created_at).toLocaleTimeString('vi-VN')} 
-                  isMe={false} // Would need real actor ID tracking to differentiate
+                <ChatMessage
+                  key={note.id}
+                  sender={`Role ID: ${note.author_role_id}`}
+                  message={note.content}
+                  time={new Date(note.created_at).toLocaleTimeString('vi-VN')}
                 />
               ))}
             </CardContent>
             <div className="p-4 border-t border-slate-100 bg-slate-50">
               <div className="flex items-center gap-2">
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                  placeholder="Type your official consultation note..." 
+                  placeholder="Type your official consultation note..."
                   className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                 />
-                <button 
+                <button
                   disabled={sending || !message.trim()}
                   onClick={handleSendMessage}
                   className="p-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition disabled:opacity-50"
@@ -180,10 +172,10 @@ export default function ConsultationPage() {
           </Card>
         ) : (
           <div className="lg:col-span-2 h-[600px] bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 space-y-4">
-             <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-sm">
-                <MessageCircle size={32} />
-             </div>
-             <p className="font-bold">Select a thread to start collaborating</p>
+            <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-sm">
+              <MessageCircle size={32} />
+            </div>
+            <p className="font-bold">Select a thread to start collaborating</p>
           </div>
         )}
       </div>
@@ -191,18 +183,14 @@ export default function ConsultationPage() {
   );
 }
 
-function ChatMessage({ sender, message, time, isMe, isSystem }: { sender: string, message: string, time: string, isMe?: boolean, isSystem?: boolean }) {
-  if (isSystem) {
-    return <div className="text-center text-[10px] text-slate-400 uppercase font-black tracking-widest">{message} ({time})</div>;
-  }
-  
+function ChatMessage({ sender, message, time }: { sender: string; message: string; time: string }) {
   return (
-    <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} space-y-1`}>
+    <div className="flex flex-col items-start space-y-1">
       <div className="flex items-center gap-2 px-2">
         <span className="text-[10px] font-bold text-slate-400">{sender}</span>
         <span className="text-[10px] text-slate-300">{time}</span>
       </div>
-      <div className={`max-w-[80%] px-4 py-2 rounded-2xl text-sm ${isMe ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white border border-slate-200 text-slate-900 rounded-tl-none'}`}>
+      <div className="max-w-[80%] px-4 py-2 rounded-2xl text-sm bg-white border border-slate-200 text-slate-900 rounded-tl-none">
         {message}
       </div>
     </div>

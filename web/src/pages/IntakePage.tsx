@@ -1,5 +1,3 @@
-'use client';
-
 import { useRole } from '@/hooks/use-role';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui-card';
 import { Upload, Info, CheckCircle2, Loader2 } from 'lucide-react';
@@ -70,15 +68,15 @@ export default function IntakePage() {
 
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3 text-red-800">
-           <Info className="shrink-0 mt-0.5" size={18} />
-           <p className="text-sm font-medium">{error}</p>
+          <Info className="shrink-0 mt-0.5" size={18} />
+          <p className="text-sm font-medium">{error}</p>
         </div>
       )}
 
       {success && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-start gap-3 text-emerald-800">
-           <CheckCircle2 className="shrink-0 mt-0.5" size={18} />
-           <p className="text-sm font-medium">File stored, extraction (mock) completed, and document record created. Open Review queue to continue.</p>
+          <CheckCircle2 className="shrink-0 mt-0.5" size={18} />
+          <p className="text-sm font-medium">File stored, extraction (mock) completed, and document record created. Open Review queue to continue.</p>
         </div>
       )}
 

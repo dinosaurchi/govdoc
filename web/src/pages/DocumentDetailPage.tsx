@@ -1,6 +1,5 @@
-'use client';
-
-import { useEffect, useState, use } from 'react';
+import { useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui-card';
 import { Badge } from '@/components/ui-badge';
 import {
@@ -17,7 +16,7 @@ import {
   ScrollText,
   Shield,
 } from 'lucide-react';
-import Link from 'next/link';
+import { Link } from 'react-router-dom';
 import { fetchApi } from '@/lib/api';
 import { useRole } from '@/hooks/use-role';
 
@@ -72,9 +71,9 @@ type DocDetail = {
   }>;
 };
 
-export default function DocumentDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
-  return <DocumentDetailInner key={id} id={id} />;
+export default function DocumentDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  return <DocumentDetailInner key={id} id={id!} />;
 }
 
 function DocumentDetailInner({ id }: { id: string }) {
@@ -173,7 +172,7 @@ function DocumentDetailInner({ id }: { id: string }) {
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-20 animate-in fade-in duration-500">
       <div className="flex items-center gap-4">
-        <Link href="/review" className="p-2 hover:bg-slate-100 rounded-full transition">
+        <Link to="/review" className="p-2 hover:bg-slate-100 rounded-full transition">
           <ArrowLeft size={20} />
         </Link>
         <div>

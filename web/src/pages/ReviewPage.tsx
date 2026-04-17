@@ -1,10 +1,8 @@
-'use client';
-
 import { useEffect, useState } from 'react';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui-card';
+import { Card } from '@/components/ui-card';
 import { Badge } from '@/components/ui-badge';
-import { Search, Filter, MoreHorizontal, ExternalLink, Loader2 } from 'lucide-react';
-import Link from 'next/link';
+import { Search, Filter, ExternalLink, Loader2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { fetchApi } from '@/lib/api';
 
 export default function ReviewPage() {
@@ -38,9 +36,9 @@ export default function ReviewPage() {
         <div className="flex items-center gap-2">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-            <input 
-              type="text" 
-              placeholder="Search documents..." 
+            <input
+              type="text"
+              placeholder="Search documents..."
               className="pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none w-64"
             />
           </div>
@@ -85,7 +83,7 @@ export default function ReviewPage() {
                       </Badge>
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <Link href={`/documents/${doc.id}`} className="inline-flex items-center gap-1 font-bold text-blue-600 hover:text-blue-800">
+                      <Link to={`/documents/${doc.id}`} className="inline-flex items-center gap-1 font-bold text-blue-600 hover:text-blue-800">
                         View <ExternalLink size={12} />
                       </Link>
                     </td>

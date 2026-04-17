@@ -1,5 +1,3 @@
-'use client';
-
 import { useState, createContext, useContext, ReactNode } from 'react';
 
 export type Role = 'Intake Clerk' | 'Department Reviewer' | 'Consultant' | 'Supervisor';
@@ -13,12 +11,8 @@ const RoleContext = createContext<RoleContextType | undefined>(undefined);
 
 export const RoleProvider = ({ children }: { children: ReactNode }) => {
   const [role, setRole] = useState<Role>(() => {
-    // Lazy initial state check
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('activeRole') as Role;
-      return saved || 'Intake Clerk';
-    }
-    return 'Intake Clerk';
+    const saved = localStorage.getItem('activeRole') as Role;
+    return saved || 'Intake Clerk';
   });
 
   const handleSetRole = (newRole: Role) => {

@@ -1,10 +1,8 @@
-'use client';
-
 import { useRole } from '@/hooks/use-role';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui-card';
 import { Badge } from '@/components/ui-badge';
-import { ArrowRight, FileText, CheckCircle2, Clock, AlertCircle, FileUp, ListChecks, MessageSquare, LayoutDashboard, Database, Loader2 } from 'lucide-react';
-import Link from 'next/link';
+import { ArrowRight, CheckCircle2, Clock, AlertCircle, FileUp, ListChecks, MessageSquare, LayoutDashboard, Database, Loader2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useState } from 'react';
 import { fetchApi } from '@/lib/api';
 
@@ -19,8 +17,8 @@ export default function HomePage() {
       const res = await fetchApi('/demo/seed', { method: 'POST' });
       setSeedResult(`Seeded ${res.seeded_documents_count} documents.`);
       setTimeout(() => setSeedResult(null), 5000);
-    } catch (err: any) {
-      setSeedResult(`Error: ${err.message}`);
+    } catch (err: unknown) {
+      setSeedResult(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setSeeding(false);
     }
@@ -37,49 +35,49 @@ export default function HomePage() {
           Automated document intake, AI-driven triage, and secure administrative workflow for government departments.
         </p>
         <div className="pt-4 flex items-center justify-center gap-4">
-           <button 
-             onClick={handleSeed}
-             disabled={seeding}
-             className="px-6 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold uppercase tracking-widest text-slate-600 hover:bg-slate-200 transition flex items-center gap-2"
-           >
-             {seeding ? <Loader2 size={14} className="animate-spin" /> : <Database size={14} />}
-             Seed Baseline Data
-           </button>
-           {seedResult && <span className="text-[10px] font-bold text-blue-600 animate-in fade-in">{seedResult}</span>}
+          <button
+            onClick={handleSeed}
+            disabled={seeding}
+            className="px-6 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold uppercase tracking-widest text-slate-600 hover:bg-slate-200 transition flex items-center gap-2"
+          >
+            {seeding ? <Loader2 size={14} className="animate-spin" /> : <Database size={14} />}
+            Seed Baseline Data
+          </button>
+          {seedResult && <span className="text-[10px] font-bold text-blue-600 animate-in fade-in">{seedResult}</span>}
         </div>
       </section>
 
       <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <RoleActionCard 
+        <RoleActionCard
           roleName="Intake Clerk"
           activeRole={role}
           title="Document Intake"
           description="Receive and classify incoming documents (công văn, tờ trình...)"
-          href="/intake"
+          to="/intake"
           icon={<FileUp className="w-8 h-8 text-blue-500" />}
         />
-        <RoleActionCard 
+        <RoleActionCard
           roleName="Department Reviewer"
           activeRole={role}
           title="Workflow Review"
           description="Validate AI routing suggestions and assign documents to departments."
-          href="/review"
+          to="/review"
           icon={<ListChecks className="w-8 h-8 text-orange-500" />}
         />
-        <RoleActionCard 
+        <RoleActionCard
           roleName="Consultant"
           activeRole={role}
           title="Internal Consultation"
           description="Provide expert opinions on cross-departmental requests."
-          href="/consultation"
+          to="/consultation"
           icon={<MessageSquare className="w-8 h-8 text-purple-500" />}
         />
-        <RoleActionCard 
+        <RoleActionCard
           roleName="Supervisor"
           activeRole={role}
           title="Final Oversight"
           description="Approve prepared responses and monitor overall system metrics."
-          href="/dashboard"
+          to="/dashboard"
           icon={<LayoutDashboard className="w-8 h-8 text-emerald-500" />}
         />
       </div>
@@ -104,32 +102,32 @@ export default function HomePage() {
             <AlertCircle className="text-orange-600" size={20} />
           </div>
           <h3 className="font-bold text-lg">AI Integration Ready</h3>
-          <p className="text-sm text-slate-500">Scaffolded adapter layer for Gemini-powered summaries, entity extraction, and routing suggestions.</p>
+          <p className="text-sm text-slate-500">Scaffolded adapter layer for Qwen-powered summaries, entity extraction, and routing suggestions.</p>
         </div>
       </div>
     </div>
   );
 }
 
-function RoleActionCard({ 
-  roleName, 
-  activeRole, 
-  title, 
-  description, 
-  href, 
-  icon 
-}: { 
-  roleName: string, 
-  activeRole: string, 
-  title: string, 
-  description: string, 
-  href: string,
-  icon: React.ReactNode 
+function RoleActionCard({
+  roleName,
+  activeRole,
+  title,
+  description,
+  to,
+  icon,
+}: {
+  roleName: string;
+  activeRole: string;
+  title: string;
+  description: string;
+  to: string;
+  icon: React.ReactNode;
 }) {
   const isMatch = roleName === activeRole;
 
   return (
-    <Link href={href}>
+    <Link to={to}>
       <Card className={`h-full border-2 transition-all hover:scale-[1.02] cursor-pointer ${isMatch ? 'border-blue-500 shadow-md ring-4 ring-blue-50 shadow-blue-100' : 'border-slate-100'}`}>
         <CardHeader className="pb-2">
           <div className="mb-4">{icon}</div>

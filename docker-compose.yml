@@ -3,12 +3,8 @@ services:
     build:
       context: ./web
       dockerfile: ../deploy/Dockerfile.web
-      args:
-        INTERNAL_API_URL: http://api:8000
     ports:
-      - "3000:3000"
-    environment:
-      - INTERNAL_API_URL=http://api:8000
+      - "${WEB_PORT:-3000}:3000"
     depends_on:
       api:
         condition: service_healthy
@@ -28,7 +24,7 @@ services:
       context: ./api
       dockerfile: ../deploy/Dockerfile.api
     ports:
-      - "8000:8000"
+      - "${APP_PORT:-8000}:8000"
     environment:
       - DATABASE_URL=sqlite:///./data/secureflow.db
     volumes:

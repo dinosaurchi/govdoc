@@ -1,9 +1,7 @@
-'use client';
-
 import { useEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui-card';
 import { Badge } from '@/components/ui-badge';
-import { Send, FileCheck, Download, History, UserCheck, Loader2, CheckCircle2 } from 'lucide-react';
+import { FileCheck, Download, UserCheck, Loader2, CheckCircle2 } from 'lucide-react';
 import { fetchApi } from '@/lib/api';
 import { useRole } from '@/hooks/use-role';
 
@@ -90,7 +88,7 @@ export default function ResponsePage() {
           <h3 className="font-bold text-sm text-slate-400 uppercase tracking-widest pl-2">Ready for Dispatch</h3>
           {documents.length === 0 ? (
             <div className="p-8 text-center bg-white border border-dashed rounded-2xl text-slate-400">
-               <p className="text-xs font-medium">No documents awaiting response finalization.</p>
+              <p className="text-xs font-medium">No documents awaiting response finalization.</p>
             </div>
           ) : (
             documents.map((doc) => (
@@ -104,22 +102,25 @@ export default function ResponsePage() {
                 onClick={() => setSelectedDoc(doc)}
                 className="rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-400"
               >
-              <Card 
-                className={`cursor-pointer transition-all ${selectedDoc?.id === doc.id ? 'border-emerald-500 shadow-md ring-2 ring-emerald-50' : 'hover:border-emerald-200'}`}
-              >
-                <CardContent className="p-4 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Badge variant={doc.state === 'closed' ? 'secondary' : 'default'} className={`scale-75 origin-left ${doc.state === 'closed' ? '' : 'bg-emerald-600'}`}>
-                      {doc.state.replace(/_/g, ' ')}
-                    </Badge>
-                    <span className="text-[10px] font-mono text-slate-400">ID: {doc.id}</span>
-                  </div>
-                  <h4 className="font-bold text-slate-900 leading-tight truncate">{doc.title}</h4>
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                    <UserCheck size={12} /> Status: {doc.state === 'closed' ? 'Dispatched' : 'Pending'}
-                  </div>
-                </CardContent>
-              </Card>
+                <Card
+                  className={`cursor-pointer transition-all ${selectedDoc?.id === doc.id ? 'border-emerald-500 shadow-md ring-2 ring-emerald-50' : 'hover:border-emerald-200'}`}
+                >
+                  <CardContent className="p-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Badge
+                        variant={doc.state === 'closed' ? 'secondary' : 'default'}
+                        className={`scale-75 origin-left ${doc.state === 'closed' ? '' : 'bg-emerald-600'}`}
+                      >
+                        {doc.state.replace(/_/g, ' ')}
+                      </Badge>
+                      <span className="text-[10px] font-mono text-slate-400">ID: {doc.id}</span>
+                    </div>
+                    <h4 className="font-bold text-slate-900 leading-tight truncate">{doc.title}</h4>
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                      <UserCheck size={12} /> Status: {doc.state === 'closed' ? 'Dispatched' : 'Pending'}
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
             ))
           )}
@@ -137,10 +138,10 @@ export default function ResponsePage() {
               <div className="space-y-4 bg-white p-8 rounded-xl border border-slate-200 shadow-inner min-h-[400px] font-serif relative">
                 {selectedDoc.state === 'closed' && (
                   <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rotate-[-25deg] opacity-10 pointer-events-none">
-                     <div className="border-8 border-emerald-600 rounded-full p-4 flex flex-col items-center justify-center">
-                        <CheckCircle2 size={80} className="text-emerald-600" />
-                        <span className="text-4xl font-black text-emerald-600 uppercase">ĐÃ BAN HÀNH</span>
-                     </div>
+                    <div className="border-8 border-emerald-600 rounded-full p-4 flex flex-col items-center justify-center">
+                      <CheckCircle2 size={80} className="text-emerald-600" />
+                      <span className="text-4xl font-black text-emerald-600 uppercase">ĐÃ BAN HÀNH</span>
+                    </div>
                   </div>
                 )}
                 <div className="flex justify-between items-start border-b border-slate-200 pb-4 mb-8">
@@ -165,7 +166,7 @@ export default function ResponsePage() {
                     Căn cứ vào quá trình rà soát và kết quả tham vấn nội bộ đối với hồ sơ số {selectedDoc.id}. Chúng tôi xin cập nhật trạng thái xử lý cuối cùng cho văn bản này.
                   </p>
                   <p>
-                    {selectedDoc.analysis?.summary || "Nội dung văn bản đã được AI xử lý và phân loại chính xác."}
+                    {selectedDoc.analysis?.summary || 'Nội dung văn bản đã được AI xử lý và phân loại chính xác.'}
                   </p>
                   <p>
                     Đề nghị đơn vị thực hiện theo các bước rà soát đã được Supervisor phê duyệt trong workflow.
@@ -175,7 +176,7 @@ export default function ResponsePage() {
 
               <div className="flex items-center justify-end gap-3 pt-4">
                 {selectedDoc.state === 'response_prepared' && role === 'Supervisor' && (
-                  <button 
+                  <button
                     disabled={actionLoading}
                     onClick={handleApprove}
                     className="px-8 py-3 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 transition flex items-center gap-2 shadow-lg shadow-emerald-100 disabled:opacity-50"
@@ -194,10 +195,10 @@ export default function ResponsePage() {
           </Card>
         ) : (
           <div className="lg:col-span-2 h-[600px] bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 space-y-4">
-             <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-sm">
-                <FileCheck size={32} />
-             </div>
-             <p className="font-bold">Select a response draft to review</p>
+            <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-sm">
+              <FileCheck size={32} />
+            </div>
+            <p className="font-bold">Select a response draft to review</p>
           </div>
         )}
       </div>

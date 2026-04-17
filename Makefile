@@ -30,7 +30,7 @@ lint:
 ci: lint build test
 
 clean:
-	rm -rf web/.next api/__pycache__
+	rm -rf web/dist web/node_modules/.vite api/__pycache__
 
 up:
 	mkdir -p data api/data
@@ -43,8 +43,12 @@ down:
 logs:
 	docker compose logs -f
 
+APP_PORT ?= 8000
+WEB_PORT ?= 3000
+
 qa:
-	bash scripts/qa_local.sh
+	$(eval _QA_HOST := $(shell docker network inspect govdoc_default --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null | head -1 || echo 127.0.0.1))
+	API_URL="http://$(_QA_HOST):$(APP_PORT)" WEB_URL="http://$(_QA_HOST):$(WEB_PORT)" bash scripts/qa_local.sh
 
 check-credentials:
 	$(PY) scripts/check_credentials.py

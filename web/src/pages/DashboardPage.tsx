@@ -1,8 +1,5 @@
-'use client';
-
 import { useEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui-card';
-import { Badge } from '@/components/ui-badge';
 import { BarChart3, PieChart, TrendingUp, Users, FileCheck, Layers } from 'lucide-react';
 import { fetchApi } from '@/lib/api';
 
