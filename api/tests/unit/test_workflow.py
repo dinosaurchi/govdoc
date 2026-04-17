@@ -90,6 +90,19 @@ class TestTerminalStates:
 
 
 @pytest.mark.unit
+class TestRoutedToInConsultation:
+    """Regression test for BUG-002: routed → in_consultation must be allowed."""
+
+    def test_routed_to_in_consultation_is_valid(self):
+        """validate_transition must NOT raise for routed → in_consultation."""
+        validate_transition(DocumentStatus.routed, DocumentStatus.in_consultation)
+
+    def test_routed_to_in_consultation_in_valid_transitions_map(self):
+        """DocumentStatus.in_consultation should appear in the allowed set for routed."""
+        assert DocumentStatus.in_consultation in VALID_TRANSITIONS[DocumentStatus.routed]
+
+
+@pytest.mark.unit
 class TestInvalidTransitionErrorAttributes:
     def test_error_message_format(self):
         with pytest.raises(InvalidTransitionError) as exc_info:

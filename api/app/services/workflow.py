@@ -27,7 +27,7 @@ VALID_TRANSITIONS: dict[DocumentStatus, set[DocumentStatus]] = {
     DocumentStatus.received: {DocumentStatus.extracted, DocumentStatus.ingest_failed},
     DocumentStatus.extracted: {DocumentStatus.analyzed, DocumentStatus.analysis_failed},
     DocumentStatus.analyzed: {DocumentStatus.routed},
-    DocumentStatus.routed: {DocumentStatus.under_review, DocumentStatus.out_of_scope},
+    DocumentStatus.routed: {DocumentStatus.under_review, DocumentStatus.out_of_scope, DocumentStatus.in_consultation},
     DocumentStatus.under_review: {
         DocumentStatus.in_consultation,
         DocumentStatus.routed,  # can go back to routed if rerouted
