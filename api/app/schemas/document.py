@@ -92,6 +92,7 @@ class DocumentListOut(BaseModel):
     status: str
     security_level: str
     urgency: str
+    assigned_department_id: str | None = None
     created_at: datetime
     consultation_notes: list[ConsultationNoteOut] = []
 

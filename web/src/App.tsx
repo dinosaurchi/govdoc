@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Link, NavLink as RouterNavLink } from 'react-router-dom';
 import { Shield, LayoutDashboard, FileUp, ListChecks, MessageSquare, ClipboardCheck } from 'lucide-react';
 import { RoleProvider, useRole, Role } from '@/hooks/use-role';
 import HomePage from '@/pages/HomePage';
@@ -75,12 +75,18 @@ function Header() {
 
 function NavLink({ to, icon, label }: { to: string; icon: ReactNode; label: string }) {
   return (
-    <Link
+    <RouterNavLink
       to={to}
-      className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-100 hover:text-blue-700 transition-colors"
+      className={({ isActive }) =>
+        `flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+          isActive
+            ? 'bg-blue-50 text-blue-700 shadow-sm ring-1 ring-blue-100'
+            : 'hover:bg-slate-100 hover:text-blue-700'
+        }`
+      }
     >
       {icon}
       <span>{label}</span>
-    </Link>
+    </RouterNavLink>
   );
 }
