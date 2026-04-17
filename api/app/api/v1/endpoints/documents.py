@@ -8,7 +8,7 @@ from app.api.deps import CurrentRole
 from app.models.document import AIAnalysis, AnalysisStage, AnalysisSource, DocumentStatus
 from app.repositories.document import DocumentRepository
 from app.schemas.document import DocumentOut, DocumentListOut, DocumentDetailOut, UploadResponse
-from app.services.ai.interface import AIProviderInterface
+from app.services.ai.interface import AIProvider
 from app.services.audit_service import write_audit_event
 from app.services.extraction.interface import ExtractionProviderInterface
 from app.services.intake_service import IntakeService
@@ -105,7 +105,7 @@ def get_document_file(doc_id: str, db: Session = Depends(deps.get_db)):
 async def analyze_document(
     doc_id: str,
     db: Session = Depends(deps.get_db),
-    ai: AIProviderInterface = Depends(deps.get_ai_provider),
+    ai: AIProvider = Depends(deps.get_ai_provider),
     role: CurrentRole = Depends(deps.get_current_role),
 ):
     from app.repositories import document as doc_repo

@@ -1,58 +1,90 @@
-"""
-Model Studio credential validation.
-
-Live API probing is intentionally NOT implemented in Pass 3 baseline.
-`make check-credentials` validates the env contract, then fails with an explicit
-message until `probe_live_credentials` is wired to the real OpenAPI-compatible
-Model Studio endpoints in a later coding-agent pass.
-
-TODO: Implement minimal generation/embed/OCR probes per govdoc_implementation_plan.md
-using typed request/response models and normalized errors.
-"""
+"""Model Studio live credential probe per §17.7."""
 
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass
-from typing import Sequence
+import base64
+from pathlib import Path
+
+from app.adapters.modelstudio.client import ModelStudioClient
+from app.adapters.modelstudio.rerank_client import RerankClient
+from app.core.config import settings
+
+# Load the white PNG fixture for OCR probe
+_FIXTURE_DIR = Path(__file__).resolve().parent.parent.parent.parent / "tests" / "fixtures"
+_WHITE_PNG = _FIXTURE_DIR / "white_10x10.png"
 
 
-class LiveCredentialProbeNotImplementedError(RuntimeError):
-    """Raised when a live Model Studio round-trip is required but not yet implemented."""
+def probe_live_credentials() -> dict:
+    """Run 5-model live probe per §17.7. Returns dict with locked keys."""
+    results: dict = {}
 
+    # Validate env vars first
+    try:
+        settings.validate_ai_config()
+    except ValueError as e:
+        error_msg = str(e)
+        for key in [
+            "qwen-plus (classify)",
+            "qwen-max (escalate)",
+            "text-embedding-v4 (embed)",
+            "qwen-vl-plus (ocr)",
+            "qwen3-rerank (rerank)",
+        ]:
+            results[key] = f"FAILED: {error_msg}"
+        return results
 
-REQUIRED_FOR_PROBE: Sequence[str] = (
-    "MODELSTUDIO_API_KEY",
-    "MODELSTUDIO_BASE_URL",
-    "MODELSTUDIO_DASHSCOPE_URL",
-)
+    # 1. Classify (qwen-plus)
+    try:
+        client = ModelStudioClient()
+        resp = client.chat_completion(
+            "qwen-plus",
+            [{"role": "user", "content": "Say 'OK' and nothing else."}],
+            max_tokens=10,
+        )
+        results["qwen-plus (classify)"] = True if resp.strip().lower() else "FAILED: empty response"
+    except Exception as e:
+        results["qwen-plus (classify)"] = f"FAILED: {e}"
 
+    # 2. Escalate (qwen-max)
+    try:
+        client = ModelStudioClient()
+        resp = client.chat_completion(
+            "qwen-max",
+            [{"role": "user", "content": "Say 'OK' and nothing else."}],
+            max_tokens=10,
+        )
+        results["qwen-max (escalate)"] = True if resp.strip().lower() else "FAILED: empty response"
+    except Exception as e:
+        results["qwen-max (escalate)"] = f"FAILED: {e}"
 
-@dataclass(frozen=True)
-class EnvValidationResult:
-    missing: tuple[str, ...]
+    # 3. Embed (text-embedding-v4)
+    try:
+        client = ModelStudioClient()
+        embs = client.embeddings(["test"])
+        results["text-embedding-v4 (embed)"] = (
+            True if embs and len(embs[0].embedding) > 0 else "FAILED: empty embedding"
+        )
+    except Exception as e:
+        results["text-embedding-v4 (embed)"] = f"FAILED: {e}"
 
+    # 4. OCR (qwen-vl-plus)
+    try:
+        client = ModelStudioClient()
+        if _WHITE_PNG.exists():
+            img_b64 = base64.b64encode(_WHITE_PNG.read_bytes()).decode()
+            client.ocr(img_b64)
+            results["qwen-vl-plus (ocr)"] = True
+        else:
+            results["qwen-vl-plus (ocr)"] = "FAILED: white_10x10.png fixture not found"
+    except Exception as e:
+        results["qwen-vl-plus (ocr)"] = f"FAILED: {e}"
 
-def validate_probe_env() -> EnvValidationResult:
-    """Return missing required variables (empty tuple if all present and non-empty)."""
-    missing: list[str] = []
-    for key in REQUIRED_FOR_PROBE:
-        val = os.environ.get(key)
-        if val is None or not str(val).strip():
-            missing.append(key)
-    return EnvValidationResult(missing=tuple(missing))
+    # 5. Rerank (qwen3-rerank)
+    try:
+        rc = RerankClient()
+        rr = rc.rerank("test query", ["test document"], top_n=1)
+        results["qwen3-rerank (rerank)"] = True if rr else "FAILED: empty results"
+    except Exception as e:
+        results["qwen3-rerank (rerank)"] = f"FAILED: {e}"
 
-
-def probe_live_credentials() -> None:
-    """
-    Perform a minimal live credential check against Model Studio.
-
-    **Not implemented** in the Pass 3 baseline: callers must treat this as a
-    hard failure until real HTTP probes are added alongside the production adapter.
-    """
-    raise LiveCredentialProbeNotImplementedError(
-        "Live Model Studio credential probe is not implemented yet. "
-        "Env validation passed; implement probe_live_credentials() in "
-        "api/app/adapters/modelstudio/credentials.py and wire httpx calls to the "
-        "documented Model Studio OpenAPI-compatible endpoints (generation, embedding, OCR)."
-    )
+    return results

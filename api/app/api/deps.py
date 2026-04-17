@@ -6,7 +6,7 @@ from fastapi import Header, HTTPException, Depends
 from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 
-from app.services.ai.interface import AIProviderInterface
+from app.services.ai.interface import AIProvider
 from app.services.ai.mock_provider import MockAIProvider
 from app.services.extraction.interface import ExtractionProviderInterface
 from app.services.extraction.mock_provider import MockExtractionProvider
@@ -36,7 +36,7 @@ def get_db() -> Generator:
         db.close()
 
 
-def get_ai_provider() -> AIProviderInterface:
+def get_ai_provider() -> AIProvider:
     return MockAIProvider()
 
 

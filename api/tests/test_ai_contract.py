@@ -1,4 +1,4 @@
-"""Contract tests for AI schemas, config loading, and prompt templates per §18.2."""
+"""Contract tests for AI schemas, config loading, helpers, and prompt templates per §18.2."""
 
 from __future__ import annotations
 
@@ -6,6 +6,17 @@ import json
 from pathlib import Path
 
 import pytest
+
+from app.adapters.modelstudio.schemas import (
+    ClassificationResult,
+    EmbeddingResult,
+    EscalationResult,
+    OCRResult,
+    RerankResult,
+    RoutingResult,
+    SummaryResult,
+)
+from app.adapters.modelstudio.helpers import strip_json_fences
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -20,8 +31,7 @@ _EXPECTED_PROMPT_FILES = {"classify.txt", "summarize.txt", "route.txt", "escalat
 
 
 # ===========================================================================
-# Schema contract tests – depend on schemas module created in a later pass.
-# These will gracefully skip if the module does not exist yet.
+# Schema contract tests
 # ===========================================================================
 
 
@@ -30,8 +40,6 @@ class TestClassificationResultSchema:
 
     @pytest.mark.contract
     def test_valid_payload_parses(self):
-        mod = pytest.importorskip("app.adapters.modelstudio.schemas", reason="Not implemented yet")
-        ClassificationResult = mod.ClassificationResult
         payload = {
             "doc_type": "cong_van",
             "confidence": 0.95,
@@ -45,11 +53,8 @@ class TestClassificationResultSchema:
         assert result.confidence == 0.95
 
     @pytest.mark.contract
-    def test_invalid_doc_type_rejected(self):
-        mod = pytest.importorskip("app.adapters.modelstudio.schemas", reason="Not implemented yet")
-        ClassificationResult = mod.ClassificationResult
+    def test_missing_doc_type_rejected(self):
         payload = {
-            "doc_type": "invalid_type",
             "confidence": 0.5,
             "rationale": "test",
             "urgency": "normal",
@@ -58,14 +63,29 @@ class TestClassificationResultSchema:
         with pytest.raises(Exception):
             ClassificationResult(**payload)
 
+    @pytest.mark.contract
+    def test_confidence_out_of_range_rejected(self):
+        payload = {
+            "doc_type": "cong_van",
+            "confidence": 1.5,
+            "rationale": "test",
+        }
+        with pytest.raises(Exception):
+            ClassificationResult(**payload)
+
+    @pytest.mark.contract
+    def test_defaults(self):
+        result = ClassificationResult(doc_type="other", confidence=0.5, rationale="test")
+        assert result.urgency == "normal"
+        assert result.confidentiality == "unclassified"
+        assert result.issuing_agency is None
+
 
 class TestSummaryResultSchema:
     """Contract tests for SummaryResult Pydantic model."""
 
     @pytest.mark.contract
     def test_valid_payload_parses(self):
-        mod = pytest.importorskip("app.adapters.modelstudio.schemas", reason="Not implemented yet")
-        SummaryResult = mod.SummaryResult
         payload = {
             "summary_points": ["point 1", "point 2"],
             "key_subject": "Administrative procedures",
@@ -77,8 +97,6 @@ class TestSummaryResultSchema:
 
     @pytest.mark.contract
     def test_missing_summary_points_rejected(self):
-        mod = pytest.importorskip("app.adapters.modelstudio.schemas", reason="Not implemented yet")
-        SummaryResult = mod.SummaryResult
         payload = {
             "key_subject": "Test",
             "key_entities": [],
@@ -92,8 +110,6 @@ class TestRoutingResultSchema:
 
     @pytest.mark.contract
     def test_valid_payload_parses(self):
-        mod = pytest.importorskip("app.adapters.modelstudio.schemas", reason="Not implemented yet")
-        RoutingResult = mod.RoutingResult
         payload = {
             "suggested_department": "phong_hanh_chinh",
             "secondary_department": None,
@@ -106,14 +122,21 @@ class TestRoutingResultSchema:
         assert result.suggested_department == "phong_hanh_chinh"
         assert result.secondary_department is None
 
+    @pytest.mark.contract
+    def test_missing_suggested_department_rejected(self):
+        payload = {
+            "routing_confidence": 0.5,
+            "routing_rationale": "test",
+        }
+        with pytest.raises(Exception):
+            RoutingResult(**payload)
+
 
 class TestEscalationResultSchema:
     """Contract tests for EscalationResult Pydantic model."""
 
     @pytest.mark.contract
     def test_valid_payload_parses(self):
-        mod = pytest.importorskip("app.adapters.modelstudio.schemas", reason="Not implemented yet")
-        EscalationResult = mod.EscalationResult
         payload = {
             "primary_recommendation": "phong_hanh_chinh",
             "alternatives": ["phong_phap_che"],
@@ -126,21 +149,49 @@ class TestEscalationResultSchema:
         result = EscalationResult(**payload)
         assert result.primary_recommendation == "phong_hanh_chinh"
 
+    @pytest.mark.contract
+    def test_missing_primary_recommendation_rejected(self):
+        payload = {
+            "alternatives": [],
+            "ambiguity_explanation": "test",
+            "confidence_per_department": {},
+            "final_confidence": 0.5,
+            "needs_consultation": False,
+        }
+        with pytest.raises(Exception):
+            EscalationResult(**payload)
+
+    @pytest.mark.contract
+    def test_missing_alternatives_rejected(self):
+        payload = {
+            "primary_recommendation": "phong_hanh_chinh",
+            "ambiguity_explanation": "test",
+            "confidence_per_department": {},
+            "final_confidence": 0.5,
+            "needs_consultation": False,
+        }
+        with pytest.raises(Exception):
+            EscalationResult(**payload)
+
 
 class TestOCRResultSchema:
     """Contract tests for OCRResult Pydantic model."""
 
     @pytest.mark.contract
     def test_valid_payload_parses(self):
-        mod = pytest.importorskip("app.adapters.modelstudio.schemas", reason="Not implemented yet")
-        OCRResult = mod.OCRResult
         payload = {
-            "extracted_text": "Sample OCR text output",
-            "confidence": 0.92,
+            "text": "Sample OCR text output",
             "page_count": 1,
         }
         result = OCRResult(**payload)
-        assert result.extracted_text == "Sample OCR text output"
+        assert result.text == "Sample OCR text output"
+
+    @pytest.mark.contract
+    def test_defaults(self):
+        result = OCRResult(text="hello")
+        assert result.extraction_method == "qwen-ocr"
+        assert result.warnings == []
+        assert result.page_count == 1
 
 
 class TestEmbeddingResultSchema:
@@ -148,15 +199,18 @@ class TestEmbeddingResultSchema:
 
     @pytest.mark.contract
     def test_valid_payload_parses(self):
-        mod = pytest.importorskip("app.adapters.modelstudio.schemas", reason="Not implemented yet")
-        EmbeddingResult = mod.EmbeddingResult
         payload = {
             "embedding": [0.1, 0.2, 0.3],
-            "dimensions": 3,
             "model": "text-embedding-v4",
+            "total_tokens": 10,
         }
         result = EmbeddingResult(**payload)
         assert len(result.embedding) == 3
+
+    @pytest.mark.contract
+    def test_embedding_is_list_of_float(self):
+        result = EmbeddingResult(embedding=[1, 2, 3], model="test", total_tokens=5)
+        assert all(isinstance(x, float) for x in result.embedding)
 
 
 class TestRerankResultSchema:
@@ -164,16 +218,53 @@ class TestRerankResultSchema:
 
     @pytest.mark.contract
     def test_valid_payload_parses(self):
-        mod = pytest.importorskip("app.adapters.modelstudio.schemas", reason="Not implemented yet")
-        RerankResult = mod.RerankResult
         payload = {
-            "results": [
-                {"index": 0, "relevance_score": 0.95, "document": {"text": "doc1"}},
-                {"index": 1, "relevance_score": 0.80, "document": {"text": "doc2"}},
-            ],
+            "index": 0,
+            "relevance_score": 0.95,
+            "text": "doc1",
         }
         result = RerankResult(**payload)
-        assert len(result.results) == 2
+        assert result.index == 0
+        assert result.relevance_score == 0.95
+        assert result.text == "doc1"
+
+
+# ===========================================================================
+# strip_json_fences tests per §17.12
+# ===========================================================================
+
+
+class TestStripJsonFences:
+    """Contract tests for JSON fence stripping helper."""
+
+    @pytest.mark.contract
+    def test_plain_json_unchanged(self):
+        assert strip_json_fences('{"a": 1}') == '{"a": 1}'
+
+    @pytest.mark.contract
+    def test_json_with_language_tag(self):
+        input_str = '```json\n{"a":1}\n```'
+        assert strip_json_fences(input_str) == '{"a":1}'
+
+    @pytest.mark.contract
+    def test_json_without_language_tag(self):
+        input_str = '```\n{"a":1}\n```'
+        assert strip_json_fences(input_str) == '{"a":1}'
+
+    @pytest.mark.contract
+    def test_surrounding_whitespace_stripped(self):
+        input_str = '  \n {"a":1} \n '
+        assert strip_json_fences(input_str) == '{"a":1}'
+
+    @pytest.mark.contract
+    def test_garbage_returned_unchanged(self):
+        assert strip_json_fences("garbage") == "garbage"
+
+    @pytest.mark.contract
+    def test_nested_backticks_in_string_literal(self):
+        input_str = '```json\n{"a": "```nested```"}\n```'
+        result = strip_json_fences(input_str)
+        assert '"a": "```nested```"' in result
 
 
 # ===========================================================================
