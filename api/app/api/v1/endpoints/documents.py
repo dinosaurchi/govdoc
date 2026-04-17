@@ -9,22 +9,11 @@ from app.models.document import Document, ExtractedArtifact
 from app.repositories.document import DocumentRepository
 from app.schemas.document import DocumentListOut, DocumentDetailOut, UploadResponse
 from app.services.ai.interface import AIProvider
-from app.services.ai.mock_provider import MockAIProvider
 from app.services.intake_service import IntakeService
 from app.services.file_validation import FileValidationError
 from app.services.storage import LocalFileStorage
 
 router = APIRouter()
-
-
-def _get_ai_provider() -> AIProvider:
-    """Try real provider; fall back to mock if credentials not configured."""
-    try:
-        from app.services.ai.real_provider import RealAIProvider
-
-        return RealAIProvider()
-    except Exception:
-        return MockAIProvider()
 
 
 @router.get("/", response_model=List[DocumentListOut])
@@ -46,14 +35,13 @@ async def create_document(
     file: UploadFile = File(...),
     db: Session = Depends(deps.get_db),
     role: CurrentRole = Depends(deps.get_current_role),
+    ai_provider: AIProvider = Depends(deps.get_ai_provider),
 ):
     """Upload a document file: validate, store, extract text, run AI analysis."""
     content = await file.read()
     filename = file.filename or "upload.bin"
     mime_type = file.content_type
 
-    # Determine AI provider (real if credentials available, mock otherwise)
-    ai_provider = _get_ai_provider()
     prompt_registry = getattr(request.app.state, "prompt_registry", None)
 
     svc = IntakeService(db)
@@ -168,6 +156,7 @@ async def re_analyze_document(
     force: bool = Query(False),
     db: Session = Depends(deps.get_db),
     role: CurrentRole = Depends(deps.require_action("documents.analyze")),
+    ai_provider: AIProvider = Depends(deps.get_ai_provider),
 ):
     """Re-run AI analysis on a document (classify → summarize → route → optional escalate)."""
     from app.services.ai.analysis_service import AnalysisService
@@ -180,7 +169,6 @@ async def re_analyze_document(
             detail={"error": {"code": "NOT_FOUND", "message": "Document not found", "details": {}}},
         )
 
-    ai_provider = _get_ai_provider()
     prompt_registry = getattr(request.app.state, "prompt_registry", None)
     analysis_svc = AnalysisService(db, ai_provider, prompt_registry=prompt_registry)
 

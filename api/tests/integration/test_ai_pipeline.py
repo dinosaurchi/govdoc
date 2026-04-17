@@ -1,4 +1,4 @@
-"""Integration tests for the AI analysis pipeline (mock provider — no live API calls)."""
+"""Integration tests for the AI analysis pipeline (fake provider — no live API calls)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.services.ai.mock_provider import MockAIProvider
+from fake_ai_provider import FakeAIProvider
 
 
 # ---------------------------------------------------------------------------
@@ -139,8 +139,8 @@ class TestAIPipeline:
         """Test that AI failure marks document as analysis_failed, not analyzed."""
         content = _make_text_file("Failure test document content.")
 
-        # Patch MockAIProvider.classify to raise an error
-        with patch.object(MockAIProvider, "classify", side_effect=RuntimeError("AI service unavailable")):
+        # Patch FakeAIProvider.classify to raise an error
+        with patch.object(FakeAIProvider, "classify", side_effect=RuntimeError("AI service unavailable")):
             resp = client.post(
                 "/api/v1/documents/",
                 headers=clerk_headers,

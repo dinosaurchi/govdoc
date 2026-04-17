@@ -2,10 +2,21 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 import pytest
+
+# ---------------------------------------------------------------------------
+# Test isolation from live AI — set placeholder MODELSTUDIO_* env vars BEFORE
+# `app.core.config.Settings` is first imported, so `validate_ai_config()`
+# passes during app lifespan in tests. Real credentials (via .env) remain
+# the source of truth in production.
+# ---------------------------------------------------------------------------
+os.environ.setdefault("MODELSTUDIO_API_KEY", "sk-test-placeholder")
+os.environ.setdefault("MODELSTUDIO_BASE_URL", "https://test.invalid/compatible-mode/v1")
+os.environ.setdefault("MODELSTUDIO_DASHSCOPE_URL", "https://test.invalid/api/v1")
 
 # ---------------------------------------------------------------------------
 # Fixtures path – make fixtures importable / discoverable
@@ -13,6 +24,51 @@ import pytest
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 if str(_FIXTURES_DIR) not in sys.path:
     sys.path.insert(0, str(_FIXTURES_DIR))
+
+
+# ---------------------------------------------------------------------------
+# Test isolation from live AI: override the real provider with a fake and
+# stub `RealAIProvider` in `app.main` so the lifespan does not hit Model
+# Studio when constructing the retrieval service. Live tests (marked
+# `live` / `live_integration`) opt out via --live.
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _override_ai_provider(monkeypatch, request):
+    if "live" in [m.name for m in request.node.iter_markers()] or "live_integration" in [
+        m.name for m in request.node.iter_markers()
+    ]:
+        yield
+        return
+
+    from app.api import deps
+    from app.main import app
+    from app.services.retrieval.retrieval_service import RetrievalService
+    from fake_ai_provider import FakeAIProvider
+
+    fake = FakeAIProvider()
+    app.dependency_overrides[deps.get_ai_provider] = lambda: fake
+
+    # Replace lifespan-instantiated retrieval service (which would construct
+    # RealAIProvider) with one wired to the fake embed function.
+    original_lifespan = app.router.lifespan_context
+
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _patched_lifespan(_app):
+        import app.main as _main
+
+        monkeypatch.setattr(_main, "RealAIProvider", lambda: fake)
+        async with original_lifespan(_app):
+            _app.state.retrieval_service = RetrievalService(embed_fn=fake.embed, rerank_fn=None)
+            yield
+
+    app.router.lifespan_context = _patched_lifespan
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(deps.get_ai_provider, None)
+        app.router.lifespan_context = original_lifespan
 
 
 # ---------------------------------------------------------------------------

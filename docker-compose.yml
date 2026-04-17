@@ -20,21 +20,16 @@ services:
       dockerfile: deploy/Dockerfile.api
     ports:
       - "${APP_PORT:-8000}:8000"
+    env_file:
+      - .env
     environment:
-      - APP_ENV=development
-      - APP_PORT=8000
-      - WEB_PORT=3000
+      # Container-specific overrides (win over .env values)
       - API_BASE_URL=http://api:8000
       - DATABASE_URL=sqlite:////app/data/secureflow.db
       - LOCAL_FILE_STORAGE_ROOT=data/uploads
       - MODELS_CONFIG_PATH=api/config/models.yaml
       - ROLES_CONFIG_PATH=api/config/roles.yaml
       - PROMPT_CONFIG_PATH=api/prompts
-      - ENABLE_DEMO_MODE=true
-      - ENABLE_CACHED_AI_RESULTS=false
-      - MODELSTUDIO_API_KEY=${MODELSTUDIO_API_KEY:-}
-      - MODELSTUDIO_BASE_URL=${MODELSTUDIO_BASE_URL:-}
-      - MODELSTUDIO_DASHSCOPE_URL=${MODELSTUDIO_DASHSCOPE_URL:-}
     volumes:
       - ./data:/app/data
     healthcheck:

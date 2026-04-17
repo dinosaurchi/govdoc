@@ -7,11 +7,7 @@ from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 
 from app.services.ai.interface import AIProvider
-from app.services.ai.mock_provider import MockAIProvider
-from app.services.extraction.interface import ExtractionProviderInterface
-from app.services.extraction.mock_provider import MockExtractionProvider
-from app.services.retrieval.interface import RetrievalProviderInterface
-from app.services.retrieval.mock_provider import MockRetrievalProvider
+from app.services.ai.real_provider import RealAIProvider
 
 from app.core.config_loader import load_roles_config
 from app.core.config import settings
@@ -24,7 +20,7 @@ _PROJECT_ROOT = _API_ROOT.parent  # govdoc/
 
 
 # ---------------------------------------------------------------------------
-# Database / Provider dependencies (unchanged)
+# Database / Provider dependencies
 # ---------------------------------------------------------------------------
 
 
@@ -37,15 +33,12 @@ def get_db() -> Generator:
 
 
 def get_ai_provider() -> AIProvider:
-    return MockAIProvider()
+    """Return the live Model Studio provider.
 
-
-def get_extraction_provider() -> ExtractionProviderInterface:
-    return MockExtractionProvider()
-
-
-def get_retrieval_provider() -> RetrievalProviderInterface:
-    return MockRetrievalProvider()
+    Fails loudly (ValueError → 500) if MODELSTUDIO_* credentials are not set.
+    Tests override this via `app.dependency_overrides[get_ai_provider]`.
+    """
+    return RealAIProvider()
 
 
 # ---------------------------------------------------------------------------

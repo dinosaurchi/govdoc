@@ -21,7 +21,7 @@ from app.services.demo import seed_all
 from app.services.file_validation import FileValidationError
 from app.services.prompt_registry import PromptRegistry
 from app.services.retrieval.retrieval_service import RetrievalService
-from app.services.ai.mock_provider import MockAIProvider
+from app.services.ai.real_provider import RealAIProvider
 from app.services.workflow import InvalidTransitionError
 
 # Resolve paths relative to the project root regardless of CWD
@@ -32,7 +32,11 @@ _PROJECT_ROOT = _API_ROOT.parent  # govdoc/
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    # Startup — seed roles/departments and register prompt versions
+    # Startup — validate AI credentials first. This fails loudly if any
+    # MODELSTUDIO_* env var is missing, per the "no fallback" contract.
+    settings.validate_ai_config()
+
+    # Seed roles/departments and register prompt versions
     db = SessionLocal()
     try:
         seed_all(db)
@@ -45,10 +49,10 @@ async def lifespan(_app: FastAPI):
     finally:
         db.close()
 
-    # Initialize retrieval service with mock embeddings
-    mock_ai = MockAIProvider()
+    # Initialize retrieval service with live embeddings (text-embedding-v4)
+    real_ai = RealAIProvider()
     retrieval_svc = RetrievalService(
-        embed_fn=mock_ai.embed,
+        embed_fn=real_ai.embed,
         rerank_fn=None,
     )
     _app.state.retrieval_service = retrieval_svc
