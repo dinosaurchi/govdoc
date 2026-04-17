@@ -18,6 +18,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: web/package-lock.json
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -29,6 +30,7 @@ jobs:
       - name: Install dependencies
         run: |
           npm install
+          npm install --prefix web
           pip install -r api/requirements.txt
 
       - name: Run CI
