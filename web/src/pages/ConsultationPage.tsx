@@ -1,7 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui-card';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Card } from '@/components/ui-card';
 import { Badge } from '@/components/ui-badge';
-import { Send, MessageCircle, Loader2, Info, Lock } from 'lucide-react';
+import {
+  Send,
+  MessageCircle,
+  Loader2,
+  Info,
+  Lock,
+  CheckCircle2,
+  Clock,
+  Search,
+  AlertTriangle,
+} from 'lucide-react';
 import { apiGet, apiPost } from '@/lib/api';
 import { useRole, type Role } from '@/hooks/use-role';
 
@@ -18,6 +28,9 @@ type ConsultDoc = {
   id: string;
   title: string;
   status: string;
+  urgency?: string | null;
+  doc_number?: string | null;
+  created_at?: string;
   consultation_notes: ConsultationNote[];
 };
 
@@ -28,8 +41,8 @@ type ConsultDoc = {
 const ROLE_ID_BY_LABEL: Record<Role, string> = {
   'Intake Clerk': 'intake_clerk',
   'Department Reviewer': 'reviewer',
-  'Consultant': 'consultant',
-  'Supervisor': 'supervisor',
+  Consultant: 'consultant',
+  Supervisor: 'supervisor',
 };
 
 const ROLE_LABEL_BY_ID: Record<string, string> = {
@@ -62,6 +75,21 @@ function chooseReplyEndpoint(doc: ConsultDoc, role: Role): 'request' | 'note' {
   return 'request';
 }
 
+function formatRelative(iso?: string | null): string {
+  if (!iso) return '';
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return '';
+  const diff = Date.now() - then;
+  const mins = Math.round(diff / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -74,6 +102,7 @@ export default function ConsultationPage() {
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
 
   const currentRoleId = ROLE_ID_BY_LABEL[role];
   const canSend = canReply(role);
@@ -117,13 +146,44 @@ export default function ConsultationPage() {
     [documents, selectedId],
   );
 
-  // Sort by created_at ascending so newest messages always appear at the bottom.
   const sortedNotes = useMemo(() => {
     if (!selectedDoc) return [] as ConsultationNote[];
     return [...selectedDoc.consultation_notes].sort(
       (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
     );
   }, [selectedDoc]);
+
+  // Split sidebar threads into active (needs attention) and resolved/closed.
+  const { activeThreads, resolvedThreads } = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    const match = (d: ConsultDoc) => {
+      if (!normalizedQuery) return true;
+      return (
+        d.title.toLowerCase().includes(normalizedQuery) ||
+        d.id.toLowerCase().includes(normalizedQuery) ||
+        (d.doc_number ?? '').toLowerCase().includes(normalizedQuery)
+      );
+    };
+    const filtered = documents.filter(match);
+    const active = filtered.filter((d) => d.status === 'in_consultation');
+    const resolved = filtered.filter((d) => d.status !== 'in_consultation');
+    // Most recently-updated first (last note timestamp or created_at)
+    const byRecency = (a: ConsultDoc, b: ConsultDoc) => {
+      const ta =
+        a.consultation_notes.at(-1)?.created_at ??
+        a.created_at ??
+        '';
+      const tb =
+        b.consultation_notes.at(-1)?.created_at ??
+        b.created_at ??
+        '';
+      return new Date(tb).getTime() - new Date(ta).getTime();
+    };
+    return {
+      activeThreads: active.sort(byRecency),
+      resolvedThreads: resolved.sort(byRecency),
+    };
+  }, [documents, query]);
 
   const handleSendMessage = async () => {
     if (!message.trim() || !selectedDoc || !canSend) return;
@@ -153,6 +213,16 @@ export default function ConsultationPage() {
     }
   };
 
+  // Auto-scroll the chat to the bottom when the notes change or the thread
+  // switches — this is standard chat UX and avoids the "new message is hidden
+  // behind the composer" problem.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [sortedNotes, selectedId]);
+
   if (loading) {
     return (
       <div className="h-96 flex items-center justify-center">
@@ -171,53 +241,94 @@ export default function ConsultationPage() {
       </div>
 
       <div className="grid lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-1 space-y-4">
-          <h3 className="font-bold text-sm text-slate-400 uppercase tracking-widest pl-2">Active Requests</h3>
-          {documents.length === 0 ? (
-            <div className="p-8 text-center bg-white border border-dashed rounded-2xl text-slate-400">
-              <p className="text-xs font-medium">No documents currently in consultation.</p>
-            </div>
-          ) : (
-            documents.map((doc) => (
-              <div
-                key={doc.id}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') setSelectedId(doc.id);
-                }}
-                onClick={() => setSelectedId(doc.id)}
-                className="rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-400"
-              >
-                <Card
-                  className={`cursor-pointer transition-all ${selectedId === doc.id ? 'border-blue-500 shadow-md ring-2 ring-blue-50' : 'hover:border-blue-200'}`}
-                >
-                  <CardContent className="p-4 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Badge variant="secondary" className="scale-75 origin-left">
-                        {doc.status.replace(/_/g, ' ')}
-                      </Badge>
-                    </div>
-                    <h4 className="font-bold text-slate-900 leading-tight truncate">{doc.title}</h4>
-                    <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                      <MessageCircle size={12} /> {doc.consultation_notes.length} notes
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-            ))
-          )}
-        </div>
+        {/* ----------------------------------------------------- Sidebar */}
+        <aside
+          className="lg:col-span-1 lg:sticky lg:top-20 lg:self-start flex flex-col gap-3 lg:max-h-[calc(100vh-7rem)]"
+          data-testid="consultation-sidebar"
+        >
+          <div className="relative">
+            <Search
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+            />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search threads…"
+              className="w-full bg-white border border-slate-200 rounded-xl pl-8 pr-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              data-testid="consultation-search"
+            />
+          </div>
 
+          <div className="flex-1 overflow-y-auto pr-1 space-y-4" data-testid="consultation-list">
+            {documents.length === 0 ? (
+              <div className="p-8 text-center bg-white border border-dashed rounded-2xl text-slate-400">
+                <MessageCircle className="mx-auto mb-2 text-slate-300" size={28} />
+                <p className="text-xs font-medium">No documents currently in consultation.</p>
+              </div>
+            ) : (
+              <>
+                <ThreadGroup
+                  label="Active"
+                  count={activeThreads.length}
+                  tone="blue"
+                  documents={activeThreads}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                  emptyHint={query ? 'No active threads match.' : 'No active consultations.'}
+                />
+                {resolvedThreads.length > 0 && (
+                  <ThreadGroup
+                    label="Resolved"
+                    count={resolvedThreads.length}
+                    tone="slate"
+                    documents={resolvedThreads}
+                    selectedId={selectedId}
+                    onSelect={setSelectedId}
+                  />
+                )}
+              </>
+            )}
+          </div>
+        </aside>
+
+        {/* ----------------------------------------------------- Thread */}
         {selectedDoc ? (
-          <Card className="lg:col-span-2 flex flex-col h-[600px]" data-testid="consultation-thread">
-            <CardHeader className="border-b border-slate-100">
-              <CardTitle className="text-lg flex items-center justify-between gap-4">
-                <span className="truncate">Thread: {selectedDoc.title}</span>
-                <span className="text-xs text-slate-400 font-mono shrink-0">{selectedDoc.id.slice(0, 8)}</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-50/50">
+          <Card
+            className="lg:col-span-2 flex flex-col h-[calc(100vh-10rem)] min-h-[520px] overflow-hidden"
+            data-testid="consultation-thread"
+          >
+            <div className="px-5 py-4 border-b border-slate-100 bg-white">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-base font-bold text-slate-900 truncate">
+                    {selectedDoc.title}
+                  </h2>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                    <StatusPill status={selectedDoc.status} />
+                    {selectedDoc.urgency && selectedDoc.urgency !== 'normal' && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-orange-100 text-orange-800 font-bold uppercase">
+                        <AlertTriangle size={10} />
+                        {selectedDoc.urgency}
+                      </span>
+                    )}
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 font-bold">
+                      <MessageCircle size={10} /> {selectedDoc.consultation_notes.length} notes
+                    </span>
+                  </div>
+                </div>
+                <span className="text-[10px] text-slate-400 font-mono shrink-0 mt-1">
+                  #{selectedDoc.id.slice(0, 8)}
+                </span>
+              </div>
+            </div>
+
+            <div
+              ref={scrollRef}
+              className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-50/50"
+              data-testid="consultation-scroll"
+            >
               {sortedNotes.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-2">
                   <Info size={24} />
@@ -231,40 +342,57 @@ export default function ConsultationPage() {
                   isOwn={note.author_role === currentRoleId}
                 />
               ))}
-            </CardContent>
-            <div className="p-4 border-t border-slate-100 bg-white space-y-2">
+            </div>
+
+            <div className="p-3 border-t border-slate-100 bg-white space-y-2">
               {error && (
-                <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                <div
+                  className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+                  data-testid="consultation-error"
+                >
                   {error}
                 </div>
               )}
               {canSend ? (
-                <div className="flex items-center gap-2" data-testid="consultation-composer">
-                  <span
-                    className={`text-[10px] font-bold uppercase px-2 py-1 rounded-md ${ROLE_TONE[currentRoleId] ?? 'bg-slate-100 text-slate-600'}`}
-                    data-testid="consultation-active-role"
-                  >
-                    You · {ROLE_LABEL_BY_ID[currentRoleId] ?? role}
-                  </span>
-                  <input
-                    type="text"
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && !sending && handleSendMessage()}
-                    placeholder="Type your consultation note…"
-                    className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                    data-testid="consultation-input"
-                  />
-                  <button
-                    type="button"
-                    disabled={sending || !message.trim()}
-                    onClick={handleSendMessage}
-                    className="p-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition disabled:opacity-50"
-                    data-testid="consultation-send"
-                    aria-label="Send message"
-                  >
-                    {sending ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
-                  </button>
+                <div data-testid="consultation-composer">
+                  <label className="flex items-end gap-2">
+                    <span
+                      className={`text-[10px] font-bold uppercase px-2 py-1 rounded-md shrink-0 ${
+                        ROLE_TONE[currentRoleId] ?? 'bg-slate-100 text-slate-600'
+                      }`}
+                      data-testid="consultation-active-role"
+                    >
+                      You · {ROLE_LABEL_BY_ID[currentRoleId] ?? role}
+                    </span>
+                    <textarea
+                      value={message}
+                      onChange={(e) => setMessage(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          if (!sending) handleSendMessage();
+                        }
+                      }}
+                      rows={1}
+                      placeholder="Type your consultation note…  (Enter to send · Shift+Enter for newline)"
+                      className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none max-h-32 min-h-[2.5rem]"
+                      data-testid="consultation-input"
+                    />
+                    <button
+                      type="button"
+                      disabled={sending || !message.trim()}
+                      onClick={handleSendMessage}
+                      className="p-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition disabled:opacity-50 shrink-0"
+                      data-testid="consultation-send"
+                      aria-label="Send message"
+                    >
+                      {sending ? (
+                        <Loader2 className="animate-spin" size={18} />
+                      ) : (
+                        <Send size={18} />
+                      )}
+                    </button>
+                  </label>
                 </div>
               ) : (
                 <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
@@ -291,12 +419,187 @@ export default function ConsultationPage() {
 }
 
 // ---------------------------------------------------------------------------
+// Sidebar
+// ---------------------------------------------------------------------------
+
+function ThreadGroup({
+  label,
+  count,
+  tone,
+  documents,
+  selectedId,
+  onSelect,
+  emptyHint,
+}: {
+  label: string;
+  count: number;
+  tone: 'blue' | 'slate';
+  documents: ConsultDoc[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  emptyHint?: string;
+}) {
+  const toneClass =
+    tone === 'blue'
+      ? 'bg-blue-100 text-blue-800'
+      : 'bg-slate-200 text-slate-700';
+  return (
+    <section className="space-y-2">
+      <header className="flex items-center justify-between px-1">
+        <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+          {label}
+        </h3>
+        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${toneClass}`}>
+          {count}
+        </span>
+      </header>
+      {documents.length === 0 ? (
+        emptyHint ? (
+          <p className="text-[11px] text-slate-400 px-1">{emptyHint}</p>
+        ) : null
+      ) : (
+        <div className="space-y-2">
+          {documents.map((doc) => (
+            <ThreadCard
+              key={doc.id}
+              doc={doc}
+              active={selectedId === doc.id}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ThreadCard({
+  doc,
+  active,
+  onSelect,
+}: {
+  doc: ConsultDoc;
+  active: boolean;
+  onSelect: (id: string) => void;
+}) {
+  const lastNote =
+    [...doc.consultation_notes].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    )[0] ?? null;
+  const snippet = (lastNote?.body ?? '').trim().replace(/\s+/g, ' ').slice(0, 90);
+  const lastAuthor = lastNote
+    ? ROLE_LABEL_BY_ID[lastNote.author_role] ?? lastNote.author_role
+    : null;
+  const updatedAt = lastNote?.created_at ?? doc.created_at;
+
+  return (
+    <div
+      key={doc.id}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect(doc.id);
+        }
+      }}
+      onClick={() => onSelect(doc.id)}
+      className={`cursor-pointer rounded-xl border transition-all outline-none focus:ring-2 focus:ring-blue-400 ${
+        active
+          ? 'border-blue-500 bg-blue-50/40 shadow-sm'
+          : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-slate-50'
+      }`}
+      data-testid="consultation-thread-card"
+      data-doc-id={doc.id}
+      data-active={active ? 'true' : 'false'}
+    >
+      <div className="p-3 space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <StatusPill status={doc.status} small />
+          <span className="text-[10px] text-slate-400 whitespace-nowrap">
+            {formatRelative(updatedAt)}
+          </span>
+        </div>
+        <h4
+          className="text-sm font-bold text-slate-900 leading-tight line-clamp-1"
+          title={doc.title}
+        >
+          {doc.title}
+        </h4>
+        {snippet ? (
+          <p className="text-xs text-slate-500 leading-snug line-clamp-2">
+            {lastAuthor && <span className="font-semibold text-slate-700">{lastAuthor}: </span>}
+            {snippet}
+            {lastNote && (lastNote.body.length ?? 0) > snippet.length ? '…' : ''}
+          </p>
+        ) : (
+          <p className="text-xs text-slate-400 italic">No messages yet.</p>
+        )}
+        <div className="flex items-center gap-3 text-[10px] text-slate-400 pt-0.5">
+          <span className="inline-flex items-center gap-1">
+            <MessageCircle size={10} /> {doc.consultation_notes.length}
+          </span>
+          {doc.urgency && doc.urgency !== 'normal' && (
+            <span className="inline-flex items-center gap-1 text-orange-700 font-bold uppercase">
+              <AlertTriangle size={10} /> {doc.urgency}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusPill({ status, small }: { status: string; small?: boolean }) {
+  const map: Record<string, { cls: string; icon: JSX.Element; label: string }> = {
+    in_consultation: {
+      cls: 'bg-amber-100 text-amber-800',
+      icon: <Clock size={10} />,
+      label: 'In consultation',
+    },
+    closed: {
+      cls: 'bg-emerald-100 text-emerald-800',
+      icon: <CheckCircle2 size={10} />,
+      label: 'Closed',
+    },
+    approved: {
+      cls: 'bg-emerald-100 text-emerald-800',
+      icon: <CheckCircle2 size={10} />,
+      label: 'Approved',
+    },
+    under_review: {
+      cls: 'bg-blue-100 text-blue-800',
+      icon: <Clock size={10} />,
+      label: 'Under review',
+    },
+  };
+  const entry = map[status] ?? {
+    cls: 'bg-slate-100 text-slate-700',
+    icon: <Clock size={10} />,
+    label: status.replace(/_/g, ' '),
+  };
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-md font-bold uppercase ${entry.cls} ${
+        small ? 'text-[9px] px-1.5 py-0.5' : 'text-[10px] px-2 py-0.5'
+      }`}
+    >
+      {entry.icon}
+      {entry.label}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Chat bubble
 // ---------------------------------------------------------------------------
 
 function ChatMessage({ note, isOwn }: { note: ConsultationNote; isOwn: boolean }) {
   const label = ROLE_LABEL_BY_ID[note.author_role] ?? note.author_role;
-  const time = new Date(note.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const time = new Date(note.created_at).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
   const tone = ROLE_TONE[note.author_role] ?? 'bg-slate-100 text-slate-700';
 
   return (
@@ -306,21 +609,31 @@ function ChatMessage({ note, isOwn }: { note: ConsultationNote; isOwn: boolean }
       data-author-role={note.author_role}
       data-own={isOwn ? 'true' : 'false'}
     >
-      <div className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'} max-w-[80%] space-y-1`}>
+      <div
+        className={`flex flex-col ${
+          isOwn ? 'items-end' : 'items-start'
+        } max-w-[75%] min-w-0 space-y-1`}
+      >
         <div className="flex items-center gap-2 px-2">
           {!isOwn && (
-            <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-md ${tone}`}>{label}</span>
+            <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-md ${tone}`}>
+              {label}
+            </span>
           )}
           <span className="text-[10px] text-slate-400">{time}</span>
           {note.resolved_at && (
-            <Badge variant="secondary" className="text-[9px]">Resolved</Badge>
+            <Badge variant="secondary" className="text-[9px]">
+              Resolved
+            </Badge>
           )}
           {isOwn && (
-            <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-md ${tone}`}>You</span>
+            <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-md ${tone}`}>
+              You
+            </span>
           )}
         </div>
         <div
-          className={`px-4 py-2 rounded-2xl text-sm shadow-sm ${
+          className={`px-4 py-2 rounded-2xl text-sm shadow-sm whitespace-pre-wrap break-words leading-relaxed ${
             isOwn
               ? 'bg-blue-600 text-white rounded-tr-none'
               : 'bg-white border border-slate-200 text-slate-900 rounded-tl-none'

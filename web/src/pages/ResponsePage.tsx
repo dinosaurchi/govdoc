@@ -1,7 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui-card';
 import { Badge } from '@/components/ui-badge';
-import { FileCheck, Download, UserCheck, Loader2, CheckCircle2 } from 'lucide-react';
+import {
+  FileCheck,
+  Download,
+  UserCheck,
+  Loader2,
+  CheckCircle2,
+  Clock,
+  Search,
+  AlertTriangle,
+} from 'lucide-react';
 import { apiGet, apiPost } from '@/lib/api';
 import { useRole } from '@/hooks/use-role';
 
@@ -14,7 +23,59 @@ type ResponseListDoc = {
   id: string;
   title: string;
   status: string;
+  urgency?: string | null;
+  created_at?: string;
 };
+
+function formatRelative(iso?: string | null): string {
+  if (!iso) return '';
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return '';
+  const diff = Date.now() - then;
+  const mins = Math.round(diff / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+function StatusPill({ status, small }: { status: string; small?: boolean }) {
+  const map: Record<string, { cls: string; icon: JSX.Element; label: string }> = {
+    closed: {
+      cls: 'bg-emerald-100 text-emerald-800',
+      icon: <CheckCircle2 size={10} />,
+      label: 'Dispatched',
+    },
+    approved: {
+      cls: 'bg-emerald-100 text-emerald-800',
+      icon: <CheckCircle2 size={10} />,
+      label: 'Approved',
+    },
+    under_review: {
+      cls: 'bg-amber-100 text-amber-800',
+      icon: <Clock size={10} />,
+      label: 'Pending',
+    },
+  };
+  const entry = map[status] ?? {
+    cls: 'bg-slate-100 text-slate-700',
+    icon: <Clock size={10} />,
+    label: status.replace(/_/g, ' '),
+  };
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-md font-bold uppercase ${entry.cls} ${
+        small ? 'text-[9px] px-1.5 py-0.5' : 'text-[10px] px-2 py-0.5'
+      }`}
+    >
+      {entry.icon}
+      {entry.label}
+    </span>
+  );
+}
 
 type ResponseDetailDoc = ResponseListDoc & {
   analyses: AIAnalysis[];
@@ -28,6 +89,7 @@ export default function ResponsePage() {
   const [loadingList, setLoadingList] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [query, setQuery] = useState('');
 
   const fetchResponses = async () => {
     try {
@@ -107,6 +169,18 @@ export default function ResponsePage() {
     }
   };
 
+  const { pendingDocs, dispatchedDocs } = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const match = (d: ResponseListDoc) =>
+      !q || d.title.toLowerCase().includes(q) || d.id.toLowerCase().includes(q);
+    const filtered = documents.filter(match);
+    const pending = filtered.filter((d) => d.status !== 'closed');
+    const dispatched = filtered.filter((d) => d.status === 'closed');
+    const byRecency = (a: ResponseListDoc, b: ResponseListDoc) =>
+      new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime();
+    return { pendingDocs: pending.sort(byRecency), dispatchedDocs: dispatched.sort(byRecency) };
+  }, [documents, query]);
+
   const getSummaryFromAnalyses = (doc: ResponseDetailDoc): string => {
     const summary = doc.analyses.find((a) => a.stage === 'summarize');
     if (summary?.payload_json?.summary_points) {
@@ -130,46 +204,57 @@ export default function ResponsePage() {
       </div>
 
       <div className="grid lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-1 space-y-4">
-          <h3 className="font-bold text-sm text-slate-400 uppercase tracking-widest pl-2">Ready for Dispatch</h3>
-          {documents.length === 0 ? (
-            <div className="p-8 text-center bg-white border border-dashed rounded-2xl text-slate-400">
-              <p className="text-xs font-medium">No documents awaiting response finalization.</p>
-            </div>
-          ) : (
-            documents.map((doc) => (
-              <div
-                key={doc.id}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') setSelectedDocId(doc.id);
-                }}
-                onClick={() => setSelectedDocId(doc.id)}
-                className="rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-400"
-              >
-                <Card
-                  className={`cursor-pointer transition-all ${selectedDocId === doc.id ? 'border-emerald-500 shadow-md ring-2 ring-emerald-50' : 'hover:border-emerald-200'}`}
-                >
-                  <CardContent className="p-4 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Badge
-                        variant={doc.status === 'closed' ? 'secondary' : 'default'}
-                        className={`scale-75 origin-left ${doc.status === 'closed' ? '' : 'bg-emerald-600'}`}
-                      >
-                        {doc.status.replace(/_/g, ' ')}
-                      </Badge>
-                    </div>
-                    <h4 className="font-bold text-slate-900 leading-tight truncate">{doc.title}</h4>
-                    <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                      <UserCheck size={12} /> {doc.status === 'closed' ? 'Dispatched' : 'Pending'}
-                    </div>
-                  </CardContent>
-                </Card>
+        {/* ----------------------------------------------------- Sidebar */}
+        <aside
+          className="lg:col-span-1 lg:sticky lg:top-20 lg:self-start flex flex-col gap-3 lg:max-h-[calc(100vh-7rem)]"
+          data-testid="response-sidebar"
+        >
+          <div className="relative">
+            <Search
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+            />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search responses…"
+              className="w-full bg-white border border-slate-200 rounded-xl pl-8 pr-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+              data-testid="response-search"
+            />
+          </div>
+          <div
+            className="flex-1 overflow-y-auto pr-1 space-y-4"
+            data-testid="response-list"
+          >
+            {documents.length === 0 ? (
+              <div className="p-8 text-center bg-white border border-dashed rounded-2xl text-slate-400">
+                <FileCheck className="mx-auto mb-2 text-slate-300" size={28} />
+                <p className="text-xs font-medium">No documents awaiting response finalization.</p>
               </div>
-            ))
-          )}
-        </div>
+            ) : (
+              <>
+                <ResponseGroup
+                  label="Pending"
+                  tone="amber"
+                  selectedId={selectedDocId}
+                  onSelect={setSelectedDocId}
+                  documents={pendingDocs}
+                  emptyHint={query ? 'No pending responses match.' : 'All caught up — nothing pending.'}
+                />
+                {dispatchedDocs.length > 0 && (
+                  <ResponseGroup
+                    label="Dispatched"
+                    tone="emerald"
+                    selectedId={selectedDocId}
+                    onSelect={setSelectedDocId}
+                    documents={dispatchedDocs}
+                  />
+                )}
+              </>
+            )}
+          </div>
+        </aside>
 
         {selectedDoc ? (
           <Card className="lg:col-span-2">
@@ -247,6 +332,115 @@ export default function ResponsePage() {
             <p className="font-bold">Select a response draft to review</p>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar helpers
+// ---------------------------------------------------------------------------
+
+function ResponseGroup({
+  label,
+  tone,
+  documents,
+  selectedId,
+  onSelect,
+  emptyHint,
+}: {
+  label: string;
+  tone: 'amber' | 'emerald';
+  documents: ResponseListDoc[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  emptyHint?: string;
+}) {
+  const toneClass =
+    tone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800';
+  return (
+    <section className="space-y-2">
+      <header className="flex items-center justify-between px-1">
+        <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+          {label}
+        </h3>
+        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${toneClass}`}>
+          {documents.length}
+        </span>
+      </header>
+      {documents.length === 0 ? (
+        emptyHint ? <p className="text-[11px] text-slate-400 px-1">{emptyHint}</p> : null
+      ) : (
+        <div className="space-y-2">
+          {documents.map((doc) => (
+            <ResponseCard
+              key={doc.id}
+              doc={doc}
+              active={selectedId === doc.id}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ResponseCard({
+  doc,
+  active,
+  onSelect,
+}: {
+  doc: ResponseListDoc;
+  active: boolean;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect(doc.id);
+        }
+      }}
+      onClick={() => onSelect(doc.id)}
+      className={`cursor-pointer rounded-xl border transition-all outline-none focus:ring-2 focus:ring-emerald-400 ${
+        active
+          ? 'border-emerald-500 bg-emerald-50/40 shadow-sm'
+          : 'border-slate-200 bg-white hover:border-emerald-200 hover:bg-slate-50'
+      }`}
+      data-testid="response-card"
+      data-doc-id={doc.id}
+      data-active={active ? 'true' : 'false'}
+    >
+      <div className="p-3 space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <StatusPill status={doc.status} small />
+          {doc.created_at && (
+            <span className="text-[10px] text-slate-400 whitespace-nowrap">
+              {formatRelative(doc.created_at)}
+            </span>
+          )}
+        </div>
+        <h4
+          className="text-sm font-bold text-slate-900 leading-tight line-clamp-2"
+          title={doc.title}
+        >
+          {doc.title}
+        </h4>
+        <div className="flex items-center gap-3 text-[10px] text-slate-400 pt-0.5">
+          <span className="inline-flex items-center gap-1">
+            <UserCheck size={10} />
+            {doc.status === 'closed' ? 'Dispatched' : 'Awaiting approval'}
+          </span>
+          {doc.urgency && doc.urgency !== 'normal' && (
+            <span className="inline-flex items-center gap-1 text-orange-700 font-bold uppercase">
+              <AlertTriangle size={10} /> {doc.urgency}
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );

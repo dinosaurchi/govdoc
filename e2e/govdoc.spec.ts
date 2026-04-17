@@ -549,17 +549,122 @@ test.describe('GovDoc E2E — Full document workflow', () => {
   });
 
   // =========================================================================
+  // Step 9d — Consultation + Response sidebars are polished (FEEDBACK-07)
+  // =========================================================================
+  test('Step 9d: Consultation sidebar, composer, and Response sidebar are polished (FEEDBACK-07)', async ({ page }) => {
+    // ---- Consultation page ---------------------------------------------
+    await page.goto('/consultation');
+    await idle(page);
+    await switchRole(page, 'Department Reviewer');
+    await page.waitForTimeout(1000);
+
+    // Sidebar structure
+    const sidebar = page.locator('[data-testid="consultation-sidebar"]');
+    await expect(sidebar).toBeVisible();
+    await expect(page.locator('[data-testid="consultation-search"]')).toBeVisible();
+    await expect(page.locator('[data-testid="consultation-list"]')).toBeVisible();
+
+    // Each card shows a status pill + title + meta (note count)
+    const cards = page.locator('[data-testid="consultation-thread-card"]');
+    const cardCount = await cards.count();
+    expect(cardCount).toBeGreaterThan(0);
+
+    // Search narrows the list
+    await page.locator('[data-testid="consultation-search"]').fill('zzz_no_match_zzz');
+    await page.waitForTimeout(200);
+    await expect(page.locator('[data-testid="consultation-thread-card"]')).toHaveCount(0);
+    await page.locator('[data-testid="consultation-search"]').fill('');
+    await page.waitForTimeout(200);
+
+    // Pick an in_consultation thread and verify the composer is a textarea that
+    // accepts newlines (Shift+Enter) without submitting.
+    const activeCard = page
+      .locator('[data-testid="consultation-thread-card"]')
+      .filter({ hasText: /in consultation/i })
+      .first();
+    await expect(activeCard).toBeVisible({ timeout: 10000 });
+    await activeCard.click();
+    await page.waitForTimeout(500);
+
+    const composer = page.locator('[data-testid="consultation-composer"]');
+    await expect(composer).toBeVisible();
+    const input = page.locator('[data-testid="consultation-input"]');
+    await expect(input).toHaveAttribute('placeholder', /Enter to send.*Shift\+Enter/i);
+
+    // A long message should wrap inside the bubble (break-words) — post one and
+    // verify the rendered bubble width is <= 80% of the thread width.
+    const longText = 'The quick brown fox ' + 'jumps over the lazy dog. '.repeat(20);
+    await input.fill(longText);
+    const [postResp] = await Promise.all([
+      page.waitForResponse(r => /\/consultation\/.+\/notes|\/request-consultation/.test(r.url()) && r.request().method() === 'POST'),
+      page.locator('[data-testid="consultation-send"]').click(),
+    ]);
+    expect([200, 204]).toContain(postResp.status());
+    await page.waitForTimeout(1500);
+
+    const ownBubble = page
+      .locator('[data-testid="consultation-message"][data-own="true"]')
+      .filter({ hasText: 'jumps over the lazy dog' })
+      .first();
+    await expect(ownBubble).toBeVisible();
+
+    // The rendered bubble (the inner flex column that holds the pill + text)
+    // should respect the 75% cap. The outer `[data-testid="consultation-message"]`
+    // is the justify-end row, so we measure its first child column.
+    const scroller = page.locator('[data-testid="consultation-scroll"]');
+    const scrollerBox = await scroller.boundingBox();
+    const bubbleColumnBox = await ownBubble.locator('> div').first().boundingBox();
+    expect(scrollerBox && bubbleColumnBox).toBeTruthy();
+    if (scrollerBox && bubbleColumnBox) {
+      expect(bubbleColumnBox.width).toBeLessThanOrEqual(scrollerBox.width * 0.8);
+      // Auto-scroll: the newest bubble must be within the visible viewport of
+      // the scroll area.
+      expect(bubbleColumnBox.y + bubbleColumnBox.height).toBeLessThanOrEqual(
+        scrollerBox.y + scrollerBox.height + 4,
+      );
+    }
+
+    // ---- Response page -------------------------------------------------
+    await page.goto('/response');
+    await idle(page);
+    await switchRole(page, 'Supervisor');
+    await page.waitForTimeout(1000);
+
+    await expect(page.locator('[data-testid="response-sidebar"]')).toBeVisible();
+    await expect(page.locator('[data-testid="response-search"]')).toBeVisible();
+    const respCards = page.locator('[data-testid="response-card"]');
+    expect(await respCards.count()).toBeGreaterThan(0);
+    // Search filters the list
+    await page.locator('[data-testid="response-search"]').fill('zzz_no_match_zzz');
+    await page.waitForTimeout(200);
+    await expect(page.locator('[data-testid="response-card"]')).toHaveCount(0);
+
+    expect(consoleErrors.filter(e => e.includes('TypeError'))).toHaveLength(0);
+  });
+
+  // =========================================================================
   // Step 9c — Workflow actions panel is role-aware and informative (FEEDBACK-06)
   // =========================================================================
   test('Step 9c: Workflow panel explains role, stage, and waiting-on state (FEEDBACK-06)', async ({ page }) => {
-    // Pick a non-terminal document explicitly (earlier tests may have closed the first row).
+    // Pick a document whose status is one of the canonical pipeline stages
+    // (earlier tests may have closed the first row, and seeded data includes
+    // terminal/error states like `analysis_failed` that don't have a live
+    // pipeline indicator).
     const docs = await page.request.get(`${API}/documents`, {
       headers: { 'X-GovDoc-Role': 'supervisor' },
     }).then((r) => r.json());
-    const openDoc = (docs as Array<{ id: string; status: string }>).find(
-      (d) => !['closed', 'archived', 'rejected'].includes(d.status),
+    const pipelineStatuses = new Set([
+      'received',
+      'extracted',
+      'analyzed',
+      'routed',
+      'under_review',
+      'in_consultation',
+    ]);
+    const openDoc = (docs as Array<{ id: string; status: string }>).find((d) =>
+      pipelineStatuses.has(d.status),
     );
-    expect(openDoc, 'expected at least one open document').toBeTruthy();
+    expect(openDoc, 'expected at least one non-terminal pipeline document').toBeTruthy();
     const docId = openDoc!.id;
 
     // --- Reviewer on a routed/under_review doc: sees Next steps + active stage ---
@@ -648,7 +753,9 @@ test.describe('GovDoc E2E — Full document workflow', () => {
       await docCards.first().click();
       await page.waitForTimeout(1000);
       // The thread panel should be visible
-      await expect(page.getByText(/Thread:/)).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[data-testid="consultation-thread"]')).toBeVisible({
+        timeout: 5000,
+      });
     }
 
     // BUG-001 check — no TypeError
