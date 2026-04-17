@@ -2,16 +2,23 @@ import { useEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui-card';
 import { Badge } from '@/components/ui-badge';
 import { Send, MessageCircle, Loader2, Info } from 'lucide-react';
-import { fetchApi } from '@/lib/api';
+import { apiGet, apiPost } from '@/lib/api';
+import { useRole } from '@/hooks/use-role';
 
 type ConsultDoc = {
-  id: number;
+  id: string;
   title: string;
-  state: string;
-  consultations: any[];
+  status: string;
+  consultation_notes: Array<{
+    id: string;
+    author_role: string;
+    body: string;
+    created_at: string;
+  }>;
 };
 
 export default function ConsultationPage() {
+  const { role } = useRole();
   const [documents, setDocuments] = useState<ConsultDoc[]>([]);
   const [selectedDoc, setSelectedDoc] = useState<ConsultDoc | null>(null);
   const [loading, setLoading] = useState(true);
@@ -20,13 +27,12 @@ export default function ConsultationPage() {
 
   const fetchConsultations = async () => {
     try {
-      const data = await fetchApi('/documents');
+      const data = await apiGet<ConsultDoc[]>('/documents/', role);
       const consultDocs = data.filter(
-        (d: { state: string; consultations: unknown[] }) =>
-          d.state.includes('consultation') || d.consultations.length > 0
+        (d) => d.status.includes('consultation') || d.consultation_notes.length > 0
       );
       setDocuments(consultDocs);
-      setSelectedDoc((prev: ConsultDoc | null) => prev ?? consultDocs[0] ?? null);
+      setSelectedDoc((prev) => prev ?? consultDocs[0] ?? null);
     } catch (err) {
       console.error(err);
     }
@@ -36,14 +42,13 @@ export default function ConsultationPage() {
     let active = true;
     (async () => {
       try {
-        const data = await fetchApi('/documents');
+        const data = await apiGet<ConsultDoc[]>('/documents/', role);
         const consultDocs = data.filter(
-          (d: { state: string; consultations: unknown[] }) =>
-            d.state.includes('consultation') || d.consultations.length > 0
+          (d) => d.status.includes('consultation') || d.consultation_notes.length > 0
         );
         if (active) {
           setDocuments(consultDocs);
-          setSelectedDoc((prev: ConsultDoc | null) => prev ?? consultDocs[0] ?? null);
+          setSelectedDoc((prev) => prev ?? consultDocs[0] ?? null);
         }
       } catch (err) {
         console.error(err);
@@ -51,25 +56,23 @@ export default function ConsultationPage() {
         if (active) setLoading(false);
       }
     })();
-    return () => {
-      active = false;
-    };
-  }, []);
+    return () => { active = false; };
+  }, [role]);
 
   const handleSendMessage = async () => {
     if (!message.trim() || !selectedDoc) return;
     setSending(true);
     try {
-      await fetchApi(`/consultation/${selectedDoc.id}/notes`, {
-        method: 'POST',
-        body: JSON.stringify({ content: message }),
-      });
+      await apiPost(`/documents/${selectedDoc.id}/request-consultation`, {
+        target_role: 'consultant',
+        body: message,
+      }, role);
       setMessage('');
-      const updated = await fetchApi(`/documents/${selectedDoc.id}`);
+      const updated = await apiGet<ConsultDoc>(`/documents/${selectedDoc.id}`, role);
       setSelectedDoc(updated);
       fetchConsultations();
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Failed to send');
     } finally {
       setSending(false);
     }
@@ -110,14 +113,13 @@ export default function ConsultationPage() {
                 >
                   <CardContent className="p-4 space-y-2">
                     <div className="flex items-center justify-between">
-                      <Badge variant={doc.state === 'consultation_completed' ? 'secondary' : 'default'} className="scale-75 origin-left">
-                        {doc.state.replace(/_/g, ' ')}
+                      <Badge variant="secondary" className="scale-75 origin-left">
+                        {doc.status.replace(/_/g, ' ')}
                       </Badge>
-                      <span className="text-[10px] font-mono text-slate-400">ID: {doc.id}</span>
                     </div>
                     <h4 className="font-bold text-slate-900 leading-tight truncate">{doc.title}</h4>
                     <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                      <MessageCircle size={12} /> {doc.consultations.length} total notes
+                      <MessageCircle size={12} /> {doc.consultation_notes.length} notes
                     </div>
                   </CardContent>
                 </Card>
@@ -131,22 +133,22 @@ export default function ConsultationPage() {
             <CardHeader className="border-b border-slate-100">
               <CardTitle className="text-lg flex items-center justify-between">
                 <span>Thread: {selectedDoc.title}</span>
-                <span className="text-xs text-slate-400 font-mono">DOC ID: {selectedDoc.id}</span>
+                <span className="text-xs text-slate-400 font-mono">{selectedDoc.id.slice(0, 8)}</span>
               </CardTitle>
             </CardHeader>
             <CardContent className="flex-1 overflow-y-auto p-6 space-y-6">
-              {selectedDoc.consultations.length === 0 && (
+              {selectedDoc.consultation_notes.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-2">
                   <Info size={24} />
                   <p className="text-sm font-medium">No notes yet. Be the first to comment.</p>
                 </div>
               )}
-              {selectedDoc.consultations.map((note: any) => (
+              {selectedDoc.consultation_notes.map((note) => (
                 <ChatMessage
                   key={note.id}
-                  sender={`Role ID: ${note.author_role_id}`}
-                  message={note.content}
-                  time={new Date(note.created_at).toLocaleTimeString('vi-VN')}
+                  sender={note.author_role}
+                  message={note.body}
+                  time={new Date(note.created_at).toLocaleTimeString()}
                 />
               ))}
             </CardContent>

@@ -1,0 +1,2 @@
+# Prompt version labels (informational only; hash is source of truth)
+# Format: {stage}/{hash_id}: "Human readable label"

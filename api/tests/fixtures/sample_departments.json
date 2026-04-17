@@ -1,0 +1,9 @@
+{
+  "departments": [
+    {"id": "phong_hanh_chinh", "name": "Phòng Hành chính"},
+    {"id": "phong_kế_hoạch", "name": "Phòng Kế hoạch"},
+    {"id": "phong_tai_chinh", "name": "Phòng Tài chính"},
+    {"id": "phong_phap_che", "name": "Phòng Pháp chế"},
+    {"id": "phong_ke_hoach_dau_tu", "name": "Phòng Kế hoạch Đầu tư"}
+  ]
+}

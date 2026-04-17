@@ -11,13 +11,20 @@ const RoleContext = createContext<RoleContextType | undefined>(undefined);
 
 export const RoleProvider = ({ children }: { children: ReactNode }) => {
   const [role, setRole] = useState<Role>(() => {
-    const saved = localStorage.getItem('activeRole') as Role;
-    return saved || 'Intake Clerk';
+    const saved = localStorage.getItem('govdoc_role') as Role;
+    if (saved) return saved;
+    // Fallback: migrate from legacy key
+    const legacy = localStorage.getItem('activeRole') as Role;
+    if (legacy) {
+      localStorage.setItem('govdoc_role', legacy);
+      return legacy;
+    }
+    return 'Intake Clerk';
   });
 
   const handleSetRole = (newRole: Role) => {
     setRole(newRole);
-    localStorage.setItem('activeRole', newRole);
+    localStorage.setItem('govdoc_role', newRole);
   };
 
   return (

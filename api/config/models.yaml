@@ -1,0 +1,34 @@
+models:
+  classify:
+    model: "qwen-plus"
+    api: "openai"
+    temperature: 0.1
+    max_tokens: 1024
+  summarize:
+    model: "qwen-plus"
+    api: "openai"
+    temperature: 0.3
+    max_tokens: 512
+  route:
+    model: "qwen-plus"
+    api: "openai"
+    temperature: 0.1
+    max_tokens: 1024
+  escalate:
+    model: "qwen-max"
+    api: "openai"
+    temperature: 0.2
+    max_tokens: 2048
+  ocr:
+    model: "qwen-vl-plus"
+    api: "openai"
+    temperature: 0.0
+    max_tokens: 2048
+  embed:
+    model: "text-embedding-v4"
+    api: "openai"
+    dimensions: 1024
+  rerank:
+    model: "qwen3-rerank"
+    api: "dashscope"
+    top_n: 5

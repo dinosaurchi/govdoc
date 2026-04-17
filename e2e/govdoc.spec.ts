@@ -1,0 +1,418 @@
+import { test, expect, Page } from '@playwright/test';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const API = 'http://172.17.0.1:8000/api/v1';
+const FIXTURE = '/workspace/projects/hackathon/2026-qwen-ai-build-day/govdoc/api/tests/fixtures/sample_cong_van.txt';
+
+/** Reset demo data via API */
+async function resetDemo(page: Page) {
+  await page.request.post(`${API}/demo/reset`, {
+    headers: { 'X-GovDoc-Role': 'supervisor' },
+  });
+}
+
+/** Switch role via the header <select> */
+async function switchRole(page: Page, role: string) {
+  await page.locator('header select').selectOption(role);
+  await page.waitForTimeout(500);
+}
+
+/** Wait until network is idle */
+async function idle(page: Page) {
+  await page.waitForLoadState('networkidle');
+}
+
+/** Navigate to the review queue and click the first document's View link.
+ *  Returns the document ID extracted from the URL. */
+async function openFirstDocument(page: Page): Promise<string> {
+  await page.locator('nav').getByText('Review', { exact: true }).click();
+  await expect(page).toHaveURL(/\/review$/);
+  await page.waitForTimeout(2000);
+  const link = page.locator('table tbody tr:first-child td:last-child a');
+  await link.waitFor({ state: 'visible' });
+  await link.click();
+  await expect(page).toHaveURL(/\/documents\/[^/]+$/);
+  await idle(page);
+  await page.waitForTimeout(1000);
+  const id = page.url().split('/').pop()!;
+  return id;
+}
+
+/** Upload the fixture file and wait for success toast */
+async function uploadFixture(page: Page) {
+  await page.locator('input[type="file"]').setInputFiles(FIXTURE);
+  await expect(
+    page.getByText('File uploaded, text extracted, and AI analysis completed'),
+  ).toBeVisible({ timeout: 20000 });
+}
+
+// ---------------------------------------------------------------------------
+// Test suite
+// ---------------------------------------------------------------------------
+
+test.describe('GovDoc E2E — Full document workflow', () => {
+  const consoleErrors: string[] = [];
+
+  test.beforeEach(async ({ page }) => {
+    page.on('console', msg => {
+      if (msg.type() === 'error') consoleErrors.push(msg.text());
+    });
+    page.on('pageerror', err => consoleErrors.push(err.message));
+    await resetDemo(page);
+    consoleErrors.length = 0;
+  });
+
+  test.afterEach(async () => {
+    if (consoleErrors.length > 0) {
+      console.log('[Console Errors]', consoleErrors);
+    }
+  });
+
+  // =========================================================================
+  // Step 1 — Landing page renders
+  // =========================================================================
+  test('Step 1: Landing page (/) renders correctly', async ({ page }) => {
+    await page.goto('/');
+    await idle(page);
+
+    await expect(page.getByRole('heading', { name: /GovDoc.*SecureFlow/i })).toBeVisible();
+    await expect(page.locator('text=Document Intake').first()).toBeVisible();
+    await expect(page.locator('text=Workflow Review').first()).toBeVisible();
+    await expect(page.locator('header select')).toBeVisible();
+    await expect(page.locator('header select')).toHaveValue('Intake Clerk');
+
+    // BUG-001 check: No TypeError in console
+    expect(consoleErrors.filter(e => e.includes('TypeError'))).toHaveLength(0);
+  });
+
+  // =========================================================================
+  // Step 2 — Role switcher works
+  // =========================================================================
+  test('Step 2: Role switcher works', async ({ page }) => {
+    await page.goto('/');
+    await idle(page);
+
+    const select = page.locator('header select');
+    await expect(select).toHaveValue('Intake Clerk');
+
+    // Switch through all roles
+    for (const role of ['Department Reviewer', 'Consultant', 'Supervisor', 'Intake Clerk']) {
+      await select.selectOption(role);
+      await expect(select).toHaveValue(role);
+    }
+
+    // BUG-001 check
+    expect(consoleErrors.filter(e => e.includes('TypeError'))).toHaveLength(0);
+  });
+
+  // =========================================================================
+  // Step 3 — Intake upload works
+  // =========================================================================
+  test('Step 3: Intake upload works', async ({ page }) => {
+    await page.goto('/');
+    await idle(page);
+    await switchRole(page, 'Intake Clerk');
+    await page.locator('nav').getByText('Intake', { exact: true }).click();
+    await expect(page).toHaveURL(/\/intake$/);
+    await idle(page);
+
+    await expect(page.getByRole('heading', { name: /Document Intake/i })).toBeVisible();
+    await uploadFixture(page);
+
+    // BUG-001 check
+    expect(consoleErrors.filter(e => e.includes('TypeError'))).toHaveLength(0);
+  });
+
+  // =========================================================================
+  // Step 4 — Review queue shows documents
+  // =========================================================================
+  test('Step 4: Review queue shows documents', async ({ page }) => {
+    await page.goto('/');
+    await idle(page);
+    await switchRole(page, 'Department Reviewer');
+    await page.locator('nav').getByText('Review', { exact: true }).click();
+    await expect(page).toHaveURL(/\/review$/);
+    await idle(page);
+
+    await expect(page.getByRole('heading', { name: /Review Queue/i })).toBeVisible();
+    await page.waitForTimeout(2000);
+    const rows = page.locator('table tbody tr');
+    await expect(rows).not.toHaveCount(0, { timeout: 10000 });
+
+    // BUG-001 check
+    expect(consoleErrors.filter(e => e.includes('TypeError'))).toHaveLength(0);
+  });
+
+  // =========================================================================
+  // Step 5 — Approve routing works
+  // =========================================================================
+  test('Step 5: Approve routing works', async ({ page }) => {
+    // Upload a new doc first (creates analyzed doc)
+    await page.goto('/');
+    await idle(page);
+    await switchRole(page, 'Intake Clerk');
+    await page.locator('nav').getByText('Intake', { exact: true }).click();
+    await expect(page).toHaveURL(/\/intake$/);
+    await idle(page);
+    await uploadFixture(page);
+
+    // Find the most recently created analyzed document via API
+    const docsResp = await page.request.get(`${API}/documents/`, {
+      headers: { 'X-GovDoc-Role': 'reviewer' },
+    });
+    const docs = await docsResp.json();
+    const analyzedDocs = docs
+      .filter((d: any) => d.status === 'analyzed')
+      .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    expect(analyzedDocs.length).toBeGreaterThan(0);
+    const docId = analyzedDocs[0].id;
+
+    // Navigate directly to the analyzed document as reviewer
+    await switchRole(page, 'Department Reviewer');
+    await page.goto(`/documents/${docId}`);
+    await idle(page);
+    await page.waitForTimeout(1000);
+
+    // The doc should be analyzed. Approve routing transitions analyzed→routed.
+    const approveBtn = page.getByRole('button', { name: /Approve routing/i });
+    await expect(approveBtn).toBeVisible({ timeout: 5000 });
+
+    // Verify the button is NOT disabled (doc must be in analyzed state)
+    const isDisabled = await approveBtn.isDisabled();
+    expect(isDisabled).toBe(false);
+
+    const [resp] = await Promise.all([
+      page.waitForResponse(r => r.url().includes('/approve-routing') && r.request().method() === 'POST'),
+      approveBtn.click(),
+    ]);
+    expect([200, 204]).toContain(resp.status());
+
+    await page.waitForTimeout(2000);
+
+    // BUG-001 check
+    expect(consoleErrors.filter(e => e.includes('TypeError'))).toHaveLength(0);
+  });
+
+  // =========================================================================
+  // Step 6 — Request consultation with custom body (BUG-006 fix)
+  // =========================================================================
+  test('Step 6: Request consultation with custom body "Xin y kien" (BUG-006)', async ({ page }) => {
+    // Upload a new doc, approve routing to get it to routed/under_review state,
+    // then request consultation.
+    await page.goto('/');
+    await idle(page);
+    await switchRole(page, 'Intake Clerk');
+    await page.locator('nav').getByText('Intake', { exact: true }).click();
+    await expect(page).toHaveURL(/\/intake$/);
+    await idle(page);
+    await uploadFixture(page);
+
+    // Find the most recently created analyzed document via API
+    const docsResp = await page.request.get(`${API}/documents/`, {
+      headers: { 'X-GovDoc-Role': 'reviewer' },
+    });
+    const docs = await docsResp.json();
+    const analyzedDocs = docs
+      .filter((d: any) => d.status === 'analyzed')
+      .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    expect(analyzedDocs.length).toBeGreaterThan(0);
+    const docId = analyzedDocs[0].id;
+
+    // Switch to reviewer and navigate directly to the analyzed document
+    await switchRole(page, 'Department Reviewer');
+    await page.goto(`/documents/${docId}`);
+    await idle(page);
+    await page.waitForTimeout(1000);
+
+    // Approve routing first (analyzed → routed)
+    const approveBtn = page.getByRole('button', { name: /Approve routing/i });
+    if (await approveBtn.isVisible() && !(await approveBtn.isDisabled())) {
+      await approveBtn.click();
+      await page.waitForTimeout(2000);
+    }
+
+    // Now request consultation — button should be visible for routed/under_review docs
+    // Click "Request consultation" to reveal the textarea
+    const consultBtn = page.getByRole('button', { name: /Request consultation/i });
+    await expect(consultBtn).toBeVisible({ timeout: 5000 });
+    await consultBtn.click();
+
+    // Fill in custom body (BUG-006: textarea should be visible and editable)
+    const textarea = page.locator('textarea[placeholder*="consulted"]');
+    await expect(textarea).toBeVisible({ timeout: 5000 });
+    await textarea.fill('Xin y kien');
+
+    // Click Send
+    const sendBtn = page.getByRole('button', { name: 'Send' });
+    await expect(sendBtn).toBeEnabled({ timeout: 3000 });
+
+    const [resp] = await Promise.all([
+      page.waitForResponse(r => r.url().includes('/request-consultation') && r.request().method() === 'POST'),
+      sendBtn.click(),
+    ]);
+    expect([200, 204]).toContain(resp.status());
+
+    // Wait for the doc to reload and show the consultation note
+    await page.waitForTimeout(3000);
+
+    // Verify the custom body "Xin y kien" appears in the consultation thread
+    await expect(page.getByText('Xin y kien')).toBeVisible({ timeout: 5000 });
+
+    // BUG-001 check
+    expect(consoleErrors.filter(e => e.includes('TypeError'))).toHaveLength(0);
+  });
+
+  // =========================================================================
+  // Step 7 — Resolve consultation works (BUG-005 fix)
+  // =========================================================================
+  test('Step 7: Resolve consultation works (BUG-005)', async ({ page }) => {
+    // Create a doc, approve routing, request consultation, then resolve
+    await page.goto('/');
+    await idle(page);
+    await switchRole(page, 'Intake Clerk');
+    await page.locator('nav').getByText('Intake', { exact: true }).click();
+    await expect(page).toHaveURL(/\/intake$/);
+    await idle(page);
+    await uploadFixture(page);
+
+    // Find the most recently created analyzed document via API
+    const docsResp = await page.request.get(`${API}/documents/`, {
+      headers: { 'X-GovDoc-Role': 'reviewer' },
+    });
+    const docs = await docsResp.json();
+    const analyzedDocs = docs
+      .filter((d: any) => d.status === 'analyzed')
+      .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    expect(analyzedDocs.length).toBeGreaterThan(0);
+    const docId = analyzedDocs[0].id;
+
+    // Switch to reviewer and navigate directly to the analyzed document
+    await switchRole(page, 'Department Reviewer');
+    await page.goto(`/documents/${docId}`);
+    await idle(page);
+    await page.waitForTimeout(1000);
+
+    // Approve routing first
+    const approveBtn = page.getByRole('button', { name: /Approve routing/i });
+    if (await approveBtn.isVisible() && !(await approveBtn.isDisabled())) {
+      await approveBtn.click();
+      await page.waitForTimeout(2000);
+    }
+
+    // Request consultation
+    const consultBtn = page.getByRole('button', { name: /Request consultation/i });
+    await expect(consultBtn).toBeVisible({ timeout: 5000 });
+    await consultBtn.click();
+    const textarea = page.locator('textarea[placeholder*="consulted"]');
+    await expect(textarea).toBeVisible({ timeout: 5000 });
+    await textarea.fill('Please review this document');
+    const sendBtn = page.getByRole('button', { name: 'Send' });
+    await expect(sendBtn).toBeEnabled({ timeout: 3000 });
+    await sendBtn.click();
+    await page.waitForTimeout(3000);
+
+    // Now the doc should be in_consultation. Verify "Resolve consultation" button is visible.
+    const resolveBtn = page.getByRole('button', { name: /Resolve consultation/i });
+    await expect(resolveBtn).toBeVisible({ timeout: 5000 });
+
+    // Click resolve
+    const [resolveResp] = await Promise.all([
+      page.waitForResponse(r => r.url().includes('/resolve-consultation') && r.request().method() === 'POST'),
+      resolveBtn.click(),
+    ]);
+    expect([200, 204]).toContain(resolveResp.status());
+
+    await page.waitForTimeout(2000);
+
+    // BUG-001 check
+    expect(consoleErrors.filter(e => e.includes('TypeError'))).toHaveLength(0);
+  });
+
+  // =========================================================================
+  // Step 8 — Close document works
+  // =========================================================================
+  test('Step 8: Close document works', async ({ page }) => {
+    await page.goto('/');
+    await idle(page);
+    await switchRole(page, 'Supervisor');
+
+    // Navigate to review queue and open first doc
+    const docId = await openFirstDocument(page);
+    await page.waitForTimeout(1000);
+
+    // Close document button is active for Supervisor
+    const closeBtn = page.getByRole('button', { name: /Close document/i });
+    await expect(closeBtn).toBeVisible({ timeout: 5000 });
+
+    const [resp] = await Promise.all([
+      page.waitForResponse(r => r.url().includes('/close') && r.request().method() === 'POST'),
+      closeBtn.click(),
+    ]);
+    expect([200, 204]).toContain(resp.status());
+
+    await page.waitForTimeout(2000);
+    await expect(page.getByRole('heading').first()).toBeVisible();
+
+    // BUG-001 check
+    expect(consoleErrors.filter(e => e.includes('TypeError'))).toHaveLength(0);
+  });
+
+  // =========================================================================
+  // Step 9 — No TypeError on consultation page (BUG-001 fix)
+  // =========================================================================
+  test('Step 9: No TypeError on consultation page (BUG-001)', async ({ page }) => {
+    await page.goto('/consultation');
+    await idle(page);
+
+    // Page should load without JS errors
+    const bodyText = await page.textContent('body');
+    expect(bodyText?.length).toBeGreaterThan(0);
+
+    // Specifically check for TypeError — BUG-001 was a crash on consultation page
+    expect(consoleErrors.filter(e => e.includes('TypeError'))).toHaveLength(0);
+
+    // The page should show "Internal Consultation" heading
+    await expect(page.getByRole('heading', { name: /Internal Consultation/i })).toBeVisible({ timeout: 5000 });
+  });
+
+  // =========================================================================
+  // Step 10 — Consultant role works (BUG-004 fix)
+  // =========================================================================
+  test('Step 10: Consultant role works (BUG-004)', async ({ page }) => {
+    // Switch to Consultant role
+    await page.goto('/');
+    await idle(page);
+    await switchRole(page, 'Consultant');
+
+    // Navigate to consultation page
+    await page.locator('nav').getByText('Consultation', { exact: true }).click();
+    await expect(page).toHaveURL(/\/consultation$/);
+    await idle(page);
+
+    // Page should load without errors (BUG-004: consultant role caused crash)
+    await expect(page.getByRole('heading', { name: /Internal Consultation/i })).toBeVisible({ timeout: 5000 });
+
+    // The demo seed has doc3 in in_consultation state — it should appear
+    await page.waitForTimeout(2000);
+    const docCards = page.locator('[role="button"]');
+    const count = await docCards.count();
+
+    // Either there are consultation docs or an empty state message
+    if (count > 0) {
+      // Click the first consultation doc to verify thread loads
+      await docCards.first().click();
+      await page.waitForTimeout(1000);
+      // The thread panel should be visible
+      await expect(page.getByText(/Thread:/)).toBeVisible({ timeout: 5000 });
+    }
+
+    // BUG-001 check — no TypeError
+    expect(consoleErrors.filter(e => e.includes('TypeError'))).toHaveLength(0);
+
+    // BUG-004 check — no errors at all for consultant role
+    expect(consoleErrors).toHaveLength(0);
+  });
+});

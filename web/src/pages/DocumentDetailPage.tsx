@@ -8,67 +8,107 @@ import {
   CheckCircle2,
   Send,
   User,
-  Building,
   Loader2,
   BrainCircuit,
   History,
   FileText,
   ScrollText,
   Shield,
+  AlertTriangle,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { fetchApi } from '@/lib/api';
+import { apiGet, apiPost } from '@/lib/api';
 import { useRole } from '@/hooks/use-role';
 
-type DocDetail = {
-  id: number;
-  title: string;
-  doc_type: string;
-  state: string;
+type AIAnalysis = {
+  id: string;
+  stage: string;
+  model_name: string;
+  prompt_version: string;
+  source: string;
+  payload_json: Record<string, unknown>;
+  confidence: number | null;
   created_at: string;
+};
+
+type AuditEvent = {
+  id: string;
+  document_id: string | null;
+  actor_role: string | null;
+  event_type: string;
+  from_state: string | null;
+  to_state: string | null;
+  metadata_json: Record<string, unknown>;
+  occurred_at: string;
+};
+
+type RoutingDecision = {
+  id: string;
+  document_id: string;
+  suggested_department_id: string | null;
+  final_department_id: string | null;
+  decided_by_role: string | null;
+  decision: string;
+  rationale: string | null;
+  created_at: string;
+};
+
+type ConsultationNote = {
+  id: string;
+  document_id: string;
+  author_role: string;
+  target_role: string | null;
+  body: string;
+  resolved_at: string | null;
+  created_at: string;
+};
+
+type DocDetail = {
+  id: string;
+  title: string;
+  doc_number: string | null;
+  issuing_agency: string | null;
+  status: string;
+  security_level: string;
+  urgency: string;
+  assigned_department_id: string | null;
+  created_at: string;
+  updated_at: string;
   files: Array<{
-    id: number;
-    file_name: string;
+    id: string;
+    original_filename: string;
     mime_type: string;
-    file_size_bytes: number;
-    storage_relative_path: string;
-    sha256_hex: string | null;
+    size_bytes: number;
+    storage_key: string;
+    sha256: string;
     created_at: string;
   }>;
   artifacts: Array<{
-    id: number;
+    id: string;
     extraction_method: string;
-    extraction_source_label: string;
-    extracted_text: string;
-    structured_metadata_json: Record<string, unknown> | null;
-    created_at: string;
+    text: string;
+    page_count: number;
+    warnings: string[];
+    extracted_at: string;
   }>;
-  analysis: {
-    suggested_type: string;
-    urgency_score: number;
-    summary: string;
-    suggested_department: string;
-    analysis_source_label: string;
-  } | null;
-  decisions: Array<{
-    id: number;
-    target_department_id: number;
-    note: string | null;
-    created_at: string;
-  }>;
-  consultations: Array<{
-    id: number;
-    author_role_id: number;
-    content: string;
-    created_at: string;
-  }>;
-  audit_logs: Array<{
-    id: number;
-    actor_role_id: number;
-    action: string;
-    details: Record<string, unknown> | null;
-    timestamp: string;
-  }>;
+  analyses: AIAnalysis[];
+  routing_decisions: RoutingDecision[];
+  consultation_notes: ConsultationNote[];
+  audit_events: AuditEvent[];
+};
+
+const STAGE_LABELS: Record<string, string> = {
+  classify: 'Classification',
+  summarize: 'Summary',
+  route: 'Routing Suggestion',
+  escalate: 'Escalation Analysis',
+};
+
+const STAGE_COLORS: Record<string, string> = {
+  classify: 'bg-blue-100 text-blue-800',
+  summarize: 'bg-emerald-100 text-emerald-800',
+  route: 'bg-orange-100 text-orange-800',
+  escalate: 'bg-red-100 text-red-800',
 };
 
 export default function DocumentDetailPage() {
@@ -82,13 +122,29 @@ function DocumentDetailInner({ id }: { id: string }) {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [routeDept, setRouteDept] = useState(1);
+  const [showConsultInput, setShowConsultInput] = useState(false);
+  const [consultBody, setConsultBody] = useState('');
+  const [analysisView, setAnalysisView] = useState<'rendered' | 'raw'>('rendered');
+
+  const fetchDoc = async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
+    try {
+      const data = await apiGet<DocDetail>(`/documents/${id}`, role);
+      setDoc(data);
+      setError(null);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to load document');
+      setDoc(null);
+    } finally {
+      if (!opts?.silent) setLoading(false);
+    }
+  };
 
   useEffect(() => {
     let active = true;
     (async () => {
       try {
-        const data = await fetchApi(`/documents/${id}`);
+        const data = await apiGet<DocDetail>(`/documents/${id}`, role);
         if (active) {
           setDoc(data);
           setError(null);
@@ -102,50 +158,28 @@ function DocumentDetailInner({ id }: { id: string }) {
         if (active) setLoading(false);
       }
     })();
-    return () => {
-      active = false;
-    };
-  }, [id]);
-
-  const fetchDoc = async (opts?: { silent?: boolean }) => {
-    if (!opts?.silent) setLoading(true);
-    try {
-      const data = await fetchApi(`/documents/${id}`);
-      setDoc(data);
-      setError(null);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to load document');
-      setDoc(null);
-    } finally {
-      if (!opts?.silent) setLoading(false);
-    }
-  };
+    return () => { active = false; };
+  }, [id, role]);
 
   const handleAction = async (action: string, payload: Record<string, string> = {}) => {
     setActionLoading(true);
     try {
-      if (action === 'route') {
-        const note = encodeURIComponent(payload.note || 'Routed via detail page');
-        await fetchApi(`/review/${id}/route?target_dept_id=${routeDept}&note=${note}`, {
-          method: 'POST',
-        });
-      } else if (action === 'approve') {
-        await fetchApi(`/review/${id}/approve`, { method: 'POST' });
-      } else if (action === 'analyze') {
-        await fetchApi(`/documents/${id}/analyze`, { method: 'POST' });
-      } else if (action === 'start-review') {
-        await fetchApi(`/review/${id}/start-review`, { method: 'POST' });
-      } else if (action === 'prepare-response') {
-        await fetchApi(`/review/${id}/prepare-response`, { method: 'POST' });
+      if (action === 'approve-routing') {
+        await apiPost(`/documents/${id}/approve-routing`, undefined, role);
+      } else if (action === 'reroute') {
+        await apiPost(`/documents/${id}/reroute`, payload, role);
+      } else if (action === 'escalate') {
+        await apiPost(`/documents/${id}/escalate`, undefined, role);
+      } else if (action === 'mark-out-of-scope') {
+        await apiPost(`/documents/${id}/mark-out-of-scope`, undefined, role);
+      } else if (action === 'close') {
+        await apiPost(`/documents/${id}/close`, undefined, role);
       } else if (action === 'request-consultation') {
-        await fetchApi(`/consultation/${id}/notes`, {
-          method: 'POST',
-          body: JSON.stringify({
-            content: payload.note || 'Consultation requested from document detail (baseline).',
-          }),
-        });
-      } else if (action === 'complete-consultation') {
-        await fetchApi(`/consultation/${id}/complete`, { method: 'POST' });
+        await apiPost(`/documents/${id}/request-consultation`, payload, role);
+      } else if (action === 'resolve-consultation') {
+        await apiPost(`/documents/${id}/resolve-consultation/${payload.note_id}`, undefined, role);
+      } else if (action === 'analyze') {
+        await apiPost(`/documents/${id}/analyze`, undefined, role);
       }
       await fetchDoc({ silent: true });
     } catch (err: unknown) {
@@ -166,8 +200,14 @@ function DocumentDetailInner({ id }: { id: string }) {
     return <div className="p-8 text-center text-red-600 font-bold">{error || 'Document not found'}</div>;
   }
 
-  const primaryArtifact = doc.artifacts[0];
   const primaryFile = doc.files[0];
+  const primaryArtifact = doc.artifacts[0];
+  const hasConsultationThread = doc.consultation_notes.length > 0 || doc.status === 'in_consultation';
+  const analysesByStage: Record<string, AIAnalysis> = {};
+  for (const a of doc.analyses) {
+    analysesByStage[a.stage] = a;
+  }
+  const hasAnalysis = doc.analyses.length > 0;
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-20 animate-in fade-in duration-500">
@@ -178,193 +218,226 @@ function DocumentDetailInner({ id }: { id: string }) {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-black tracking-tight text-slate-900">{doc.title}</h1>
-            <Badge variant="outline" className="uppercase text-[10px] font-black">
-              {doc.doc_type}
-            </Badge>
+            {doc.urgency !== 'normal' && (
+              <Badge className={`uppercase text-[10px] font-black ${doc.urgency === 'critical' ? 'bg-red-600' : 'bg-orange-500'}`}>
+                {doc.urgency}
+              </Badge>
+            )}
           </div>
           <p className="text-slate-500 text-sm font-medium">
-            Created: {new Date(doc.created_at).toLocaleString('vi-VN')}
+            Created: {new Date(doc.created_at).toLocaleString()}
+            {doc.issuing_agency && <> · From: {doc.issuing_agency}</>}
           </p>
         </div>
         <div className="ml-auto">
           <Badge className="px-4 py-1 text-sm font-bold capitalize">
-            {doc.state.replace(/_/g, ' ')}
+            {doc.status.replace(/_/g, ' ')}
           </Badge>
         </div>
       </div>
 
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
+          {/* File & Extraction Card */}
           <Card>
             <CardHeader className="border-b border-slate-100 pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <FileText size={18} className="text-slate-700" /> Stored file & extraction (baseline)
+                <FileText size={18} className="text-slate-700" /> Stored file &amp; extraction
               </CardTitle>
             </CardHeader>
             <CardContent className="p-6 space-y-4 text-sm">
-              {!primaryFile && <p className="text-slate-500">No file rows persisted for this document.</p>}
+              {!primaryFile && <p className="text-slate-500">No file attached to this document.</p>}
               {primaryFile && (
                 <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-2">
                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">File metadata</p>
-                  <p><span className="font-semibold text-slate-700">Name:</span> {primaryFile.file_name}</p>
+                  <p><span className="font-semibold text-slate-700">Name:</span> {primaryFile.original_filename}</p>
                   <p><span className="font-semibold text-slate-700">MIME:</span> {primaryFile.mime_type}</p>
-                  <p><span className="font-semibold text-slate-700">Size:</span> {primaryFile.file_size_bytes} bytes</p>
-                  <p className="font-mono text-xs break-all">
-                    <span className="font-semibold text-slate-700 font-sans">Storage key:</span> {primaryFile.storage_relative_path}
-                  </p>
-                  {primaryFile.sha256_hex && (
+                  <p><span className="font-semibold text-slate-700">Size:</span> {primaryFile.size_bytes} bytes</p>
+                  {primaryFile.sha256 && (
                     <p className="font-mono text-xs break-all">
-                      <span className="font-semibold text-slate-700 font-sans">SHA-256:</span> {primaryFile.sha256_hex}
+                      <span className="font-semibold text-slate-700 font-sans">SHA-256:</span> {primaryFile.sha256}
                     </p>
                   )}
                 </div>
               )}
-              {!primaryArtifact && (
-                <p className="text-amber-800 text-sm font-medium">No extracted artifact yet — upload path may be incomplete.</p>
-              )}
               {primaryArtifact && (
                 <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-4 space-y-3">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-blue-500">Extracted artifact (preview)</p>
-                  <p>
-                    <span className="font-semibold text-slate-800">Method:</span> {primaryArtifact.extraction_method}
-                  </p>
-                  <p>
-                    <span className="font-semibold text-slate-800">Source label:</span> {primaryArtifact.extraction_source_label}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-blue-500">Extracted artifact</p>
+                    <Badge variant="outline" className="text-[9px] font-mono">{primaryArtifact.extraction_method}</Badge>
+                  </div>
+                  <p><span className="font-semibold text-slate-800">Pages:</span> {primaryArtifact.page_count}</p>
                   <div>
                     <p className="font-semibold text-slate-800 mb-1">Extracted text</p>
                     <p className="text-slate-700 leading-relaxed whitespace-pre-wrap border border-slate-200 rounded-lg p-3 bg-white max-h-48 overflow-y-auto">
-                      {primaryArtifact.extracted_text}
+                      {primaryArtifact.text}
                     </p>
                   </div>
-                  {primaryArtifact.structured_metadata_json && (
-                    <div>
-                      <p className="font-semibold text-slate-800 mb-1">Structured metadata (mock)</p>
-                      <pre className="text-xs font-mono bg-white border border-slate-200 rounded-lg p-3 overflow-x-auto">
-                        {JSON.stringify(primaryArtifact.structured_metadata_json, null, 2)}
-                      </pre>
-                    </div>
-                  )}
                 </div>
               )}
             </CardContent>
           </Card>
 
+          {/* AI Analyses Card */}
           <Card className="border-blue-100 bg-blue-50/30 overflow-hidden">
             <CardHeader className="bg-blue-50/50 border-b border-blue-100 pb-3">
-              <CardTitle className="text-base flex items-center gap-2 text-blue-800">
-                <BrainCircuit size={18} /> AI analysis (mock provider)
-              </CardTitle>
+              <div className="flex items-center justify-between gap-4">
+                <CardTitle className="text-base flex items-center gap-2 text-blue-800">
+                  <BrainCircuit size={18} /> AI Analysis
+                </CardTitle>
+                <div className="inline-flex rounded-lg border border-blue-100 bg-white p-1 text-xs font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setAnalysisView('rendered')}
+                    className={`rounded-md px-3 py-1 transition ${
+                      analysisView === 'rendered' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-700'
+                    }`}
+                  >
+                    Rendered
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAnalysisView('raw')}
+                    className={`rounded-md px-3 py-1 transition ${
+                      analysisView === 'raw' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-700'
+                    }`}
+                  >
+                    Raw JSON
+                  </button>
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="p-6">
-              {doc.analysis ? (
-                <div className="grid md:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-blue-400">
-                      Source: {doc.analysis.analysis_source_label}
-                    </p>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-blue-400">Suggested Dept</label>
-                      <div className="flex items-center gap-2 font-bold text-slate-900">
-                        <Building size={16} className="text-blue-600" />
-                        {doc.analysis.suggested_department}
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-blue-400">Urgency Score</label>
-                      <div className="flex items-center gap-1">
-                        {[1, 2, 3, 4, 5].map((v) => (
-                          <div
-                            key={v}
-                            className={`h-1.5 w-8 rounded-full ${
-                              v <= doc.analysis!.urgency_score ? 'bg-orange-500' : 'bg-slate-200'
-                            }`}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-blue-400">Summary</label>
-                    <p className="text-sm text-slate-700 leading-relaxed font-medium italic">
-                      &quot;{doc.analysis.summary}&quot;
-                    </p>
-                  </div>
+              {hasAnalysis ? (
+                <div className="space-y-4">
+                  {doc.analyses.map((analysis) => (
+                    <AnalysisCard key={analysis.id} analysis={analysis} view={analysisView} />
+                  ))}
                 </div>
               ) : (
                 <div className="text-center py-8 space-y-4">
-                  <p className="text-slate-500 text-sm font-medium">No AI analysis row for this document yet.</p>
+                  <p className="text-slate-500 text-sm font-medium">No AI analysis yet for this document.</p>
                   <button
                     disabled={actionLoading}
                     onClick={() => handleAction('analyze')}
                     className="px-6 py-2 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 flex items-center gap-2 mx-auto disabled:opacity-50"
                   >
                     {actionLoading ? <Loader2 className="animate-spin" size={16} /> : <BrainCircuit size={16} />}
-                    Run mock AI analysis
+                    Run AI analysis
                   </button>
                 </div>
               )}
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <MessageSquare size={18} className="text-purple-600" /> Consultation thread
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {doc.consultations.length > 0 ? (
-                doc.consultations.map((note) => (
-                  <div key={note.id} className="flex gap-4 p-4 rounded-2xl bg-slate-50 border border-slate-100">
-                    <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center shrink-0 border border-slate-200 shadow-sm">
-                      <User size={18} className="text-slate-400" />
-                    </div>
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-sm text-slate-900">Role ID: {note.author_role_id}</span>
-                        <span className="text-[10px] text-slate-400">
-                          {new Date(note.created_at).toLocaleTimeString('vi-VN')}
-                        </span>
-                      </div>
-                      <p className="text-sm text-slate-600 leading-relaxed">{note.content}</p>
-                    </div>
+          {/* Routing Decisions */}
+          {(doc.routing_decisions.length > 0) && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <ScrollText size={18} className="text-slate-600" /> Routing decisions
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {doc.status === 'out_of_scope' && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    This document was later marked out of scope. The routing record below is preserved for audit history.
                   </div>
-                ))
-              ) : (
-                <div className="py-12 text-center text-slate-400">
-                  <p className="text-sm font-medium italic">No consultation notes yet.</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                )}
+                {doc.routing_decisions.map((dec) => (
+                  <div key={dec.id} className="text-sm border-l-2 border-slate-200 pl-4 py-1 space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Badge variant={dec.decision === 'accepted' ? 'default' : 'secondary'} className="text-[9px] uppercase">
+                        {humanizeEnum(dec.decision)}
+                      </Badge>
+                      {dec.suggested_department_id && (
+                        <span className="text-xs text-slate-500">Suggested: {humanizeDepartment(dec.suggested_department_id)}</span>
+                      )}
+                      {dec.final_department_id && (
+                        <span className="text-xs font-bold text-slate-800">Final: {humanizeDepartment(dec.final_department_id)}</span>
+                      )}
+                    </div>
+                    {dec.rationale && <p className="text-xs text-slate-500 italic">&quot;{dec.rationale}&quot;</p>}
+                    <p className="text-[10px] text-slate-300 font-mono">
+                      {new Date(dec.created_at).toLocaleString()} · by {dec.decided_by_role || 'AI'}
+                    </p>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
 
+          {/* Consultation Notes */}
+          {hasConsultationThread && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <MessageSquare size={18} className="text-purple-600" /> Consultation thread
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {doc.consultation_notes.length > 0 ? (
+                  doc.consultation_notes.map((note) => (
+                    <div key={note.id} className="flex gap-4 p-4 rounded-2xl bg-slate-50 border border-slate-100">
+                      <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center shrink-0 border border-slate-200 shadow-sm">
+                        <User size={18} className="text-slate-400" />
+                      </div>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm text-slate-900">{note.author_role}</span>
+                          {note.target_role && <span className="text-[10px] text-slate-400">→ {note.target_role}</span>}
+                          <span className="text-[10px] text-slate-400">
+                            {new Date(note.created_at).toLocaleTimeString()}
+                          </span>
+                          {note.resolved_at && <Badge variant="secondary" className="text-[9px]">Resolved</Badge>}
+                        </div>
+                        <p className="text-sm text-slate-600 leading-relaxed">{note.body}</p>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="py-12 text-center text-slate-400">
+                    <p className="text-sm font-medium italic">Consultation is active, but no notes have been recorded yet.</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Audit Events */}
           <Card>
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
-                <ScrollText size={18} className="text-slate-600" /> Recent audit log
+                <History size={18} className="text-slate-600" /> Audit timeline
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 max-h-64 overflow-y-auto text-xs font-mono text-slate-600">
-              {doc.audit_logs.length === 0 && <p className="text-slate-400">No audit entries.</p>}
-              {doc.audit_logs
+              {doc.audit_events.length === 0 && <p className="text-slate-400">No audit entries.</p>}
+              {doc.audit_events
                 .slice()
                 .reverse()
-                .slice(0, 12)
+                .slice(0, 20)
                 .map((a) => (
                   <div key={a.id} className="border-b border-slate-100 pb-2">
                     <div className="flex justify-between gap-2 text-[10px] text-slate-400">
-                      <span>{new Date(a.timestamp).toLocaleString('vi-VN')}</span>
-                      <span>role {a.actor_role_id}</span>
+                      <span>{new Date(a.occurred_at).toLocaleString()}</span>
+                      <span>{a.actor_role || 'system'}</span>
                     </div>
-                    <p className="text-slate-800 font-bold">{a.action}</p>
-                    {a.details && <pre className="whitespace-pre-wrap break-all">{JSON.stringify(a.details)}</pre>}
+                    <div className="flex items-center gap-2">
+                      <p className="text-slate-800 font-bold">{a.event_type}</p>
+                      {a.from_state && a.to_state && (
+                        <span className="text-slate-400">
+                          {a.from_state} → {a.to_state}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 ))}
             </CardContent>
           </Card>
         </div>
 
+        {/* Sidebar — Workflow Actions */}
         <div className="space-y-6">
           <Card>
             <CardHeader>
@@ -373,104 +446,419 @@ function DocumentDetailInner({ id }: { id: string }) {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="space-y-1 text-xs text-slate-500">
-                <label className="font-semibold text-slate-700">Route to department ID</label>
-                <select
-                  value={routeDept}
-                  onChange={(e) => setRouteDept(Number(e.target.value))}
-                  className="w-full border border-slate-200 rounded-lg px-2 py-1 bg-white"
-                >
-                  {[1, 2, 3, 4, 5].map((n) => (
-                    <option key={n} value={n}>
-                      Department {n}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
               <ActionButton
-                label="Run mock analysis"
+                label="Run AI analysis"
                 icon={<BrainCircuit size={16} />}
                 onClick={() => handleAction('analyze')}
-                disabled={actionLoading || !!doc.analysis}
+                disabled={actionLoading || hasAnalysis}
                 active={role === 'Intake Clerk' || role === 'Supervisor'}
                 variant="blue"
               />
               <ActionButton
-                label="Route to department"
-                icon={<Send size={16} />}
-                onClick={() => handleAction('route')}
-                disabled={actionLoading || doc.state !== 'routed_pending_human_review'}
-                active={role === 'Intake Clerk' || role === 'Department Reviewer' || role === 'Supervisor'}
-              />
-              <ActionButton
-                label="Start department review"
-                icon={<Building size={16} />}
-                onClick={() => handleAction('start-review')}
-                disabled={actionLoading || doc.state !== 'assigned_to_department'}
-                active={role === 'Department Reviewer' || role === 'Supervisor'}
-                variant="purple"
-              />
-              <ActionButton
-                label="Request consultation"
-                icon={<MessageSquare size={16} />}
-                onClick={() => handleAction('request-consultation')}
-                disabled={actionLoading || doc.state !== 'under_review'}
-                active={role === 'Department Reviewer' || role === 'Supervisor'}
-                variant="purple"
-              />
-              <ActionButton
-                label="Mark consultation complete"
+                label="Approve routing"
                 icon={<CheckCircle2 size={16} />}
-                onClick={() => handleAction('complete-consultation')}
-                disabled={actionLoading || doc.state !== 'consultation_requested'}
-                active={role === 'Consultant' || role === 'Department Reviewer' || role === 'Supervisor'}
-                variant="emerald"
-              />
-              <ActionButton
-                label="Prepare response draft"
-                icon={<Send size={16} />}
-                onClick={() => handleAction('prepare-response')}
-                disabled={
-                  actionLoading || !['under_review', 'consultation_completed'].includes(doc.state)
-                }
+                onClick={() => handleAction('approve-routing')}
+                disabled={actionLoading || doc.status !== 'analyzed'}
                 active={role === 'Department Reviewer' || role === 'Supervisor'}
                 variant="emerald"
               />
-              <ActionButton
-                label="Approve & close (supervisor)"
-                icon={<CheckCircle2 size={16} />}
-                onClick={() => handleAction('approve')}
-                disabled={actionLoading || doc.state !== 'response_prepared'}
-                variant="emerald"
-                active={role === 'Supervisor'}
-              />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <History size={18} className="text-slate-600" /> Routing decisions
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {doc.decisions.map((dec) => (
-                <div key={dec.id} className="text-sm border-l-2 border-slate-200 pl-4 py-1 space-y-1">
-                  <p className="font-bold text-slate-900">Dept ID: {dec.target_department_id}</p>
-                  <p className="text-xs text-slate-500 italic">&quot;{dec.note || 'No note'}&quot;</p>
-                  <p className="text-[10px] text-slate-300 font-mono uppercase tracking-tighter">
-                    {new Date(dec.created_at).toLocaleString('vi-VN')}
-                  </p>
+              {/* Request consultation */}
+              {(role === 'Department Reviewer' || role === 'Supervisor') && (
+                <div className="space-y-2">
+                  {!showConsultInput ? (
+                    <ActionButton
+                      label="Request consultation"
+                      icon={<MessageSquare size={16} />}
+                      onClick={() => setShowConsultInput(true)}
+                      disabled={actionLoading || !['under_review', 'routed'].includes(doc.status)}
+                      active={true}
+                      variant="purple"
+                    />
+                  ) : (
+                    <div className="rounded-xl border border-purple-200 bg-purple-50/50 p-3 space-y-2">
+                      <textarea
+                        value={consultBody}
+                        onChange={(e) => setConsultBody(e.target.value)}
+                        placeholder="Describe what you need consulted on..."
+                        rows={3}
+                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 outline-none resize-none"
+                      />
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={actionLoading || !consultBody.trim()}
+                          onClick={() => {
+                            handleAction('request-consultation', { target_role: 'consultant', body: consultBody });
+                            setConsultBody('');
+                            setShowConsultInput(false);
+                          }}
+                          className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl font-bold text-sm hover:bg-purple-700 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {actionLoading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
+                          Send
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setShowConsultInput(false); setConsultBody(''); }}
+                          className="px-3 py-2 text-slate-500 hover:text-slate-700 text-sm font-medium rounded-xl hover:bg-slate-100 transition"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              ))}
-              {doc.decisions.length === 0 && <p className="text-xs text-slate-400 italic">No routing decisions yet.</p>}
+              )}
+              {/* Resolve consultation */}
+              <ActionButton
+                label="Resolve consultation"
+                icon={<CheckCircle2 size={16} />}
+                onClick={() => {
+                  const unresolved = doc.consultation_notes.filter((n) => n.resolved_at === null);
+                  const mostRecent = unresolved[unresolved.length - 1];
+                  if (mostRecent) {
+                    handleAction('resolve-consultation', { note_id: mostRecent.id });
+                  }
+                }}
+                disabled={actionLoading || doc.status !== 'in_consultation' || !doc.consultation_notes.some((n) => n.resolved_at === null)}
+                active={role === 'Department Reviewer' || role === 'Supervisor' || role === 'Consultant'}
+                variant="emerald"
+              />
+              <ActionButton
+                label="Escalate to supervisor"
+                icon={<AlertTriangle size={16} />}
+                onClick={() => handleAction('escalate')}
+                disabled={actionLoading}
+                active={role === 'Department Reviewer' || role === 'Supervisor'}
+                variant="blue"
+              />
+              <ActionButton
+                label="Mark out of scope"
+                icon={<Send size={16} />}
+                onClick={() => handleAction('mark-out-of-scope')}
+                disabled={actionLoading}
+                active={role === 'Department Reviewer' || role === 'Supervisor'}
+              />
+              <ActionButton
+                label="Close document"
+                icon={<CheckCircle2 size={16} />}
+                onClick={() => handleAction('close')}
+                disabled={actionLoading}
+                active={role === 'Supervisor'}
+                variant="emerald"
+              />
             </CardContent>
           </Card>
         </div>
       </div>
     </div>
   );
+}
+
+function AnalysisCard({ analysis, view }: { analysis: AIAnalysis; view: 'rendered' | 'raw' }) {
+  const stageLabel = STAGE_LABELS[analysis.stage] || analysis.stage;
+  const stageColor = STAGE_COLORS[analysis.stage] || 'bg-slate-100 text-slate-800';
+  const payload = analysis.payload_json;
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Badge className={`text-[9px] font-black uppercase ${stageColor}`}>
+            {stageLabel}
+          </Badge>
+          <span className="text-[10px] text-slate-400 font-mono">
+            {analysis.model_name}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="text-[9px] font-mono">
+            {analysis.source}
+          </Badge>
+          {analysis.confidence != null && (
+            <span className="text-xs font-bold text-slate-600">
+              {(analysis.confidence * 100).toFixed(1)}%
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="text-xs text-slate-600 space-y-1">
+        {view === 'rendered' ? (
+          <RenderedAnalysis stage={analysis.stage} payload={payload} />
+        ) : (
+          <pre className="whitespace-pre-wrap break-all bg-slate-50 rounded-lg p-3 border border-slate-100 overflow-x-auto max-h-40">
+            {JSON.stringify(payload, null, 2)}
+          </pre>
+        )}
+      </div>
+      <p className="text-[10px] text-slate-300">
+        {new Date(analysis.created_at).toLocaleString()}
+      </p>
+    </div>
+  );
+}
+
+function RenderedAnalysis({ stage, payload }: { stage: string; payload: Record<string, unknown> }) {
+  if (stage === 'classify') {
+    return <RenderedClassification payload={payload} />;
+  }
+  if (stage === 'route') {
+    return <RenderedRouting payload={payload} />;
+  }
+  if (stage === 'escalate') {
+    return <RenderedEscalation payload={payload} />;
+  }
+
+  const rows = getRenderedRows(stage, payload);
+
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-lg border border-slate-100 bg-slate-50 p-3 text-sm text-slate-500">
+        No structured summary available for this analysis.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+      {rows.map((row) => (
+        <div key={row.label} className="space-y-1">
+          <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">{row.label}</p>
+          {row.items ? (
+            <ul className="list-disc pl-4 text-sm leading-relaxed text-slate-700">
+              {row.items.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm leading-relaxed text-slate-700">{row.value}</p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RenderedRouting({ payload }: { payload: Record<string, unknown> }) {
+  const suggestedDepartment = humanizeEnum(payload.suggested_department);
+  const secondaryDepartment = humanizeEnum(payload.secondary_department);
+  const routingRationale = stringifyValue(payload.routing_rationale);
+  const needsConsultation = booleanLabel(payload.needs_consultation);
+  const needsSupervisorReview = booleanLabel(payload.needs_supervisor_review);
+
+  return (
+    <div className="space-y-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+      <div className="flex flex-wrap gap-2">
+        {suggestedDepartment && <ClassifyPill label="Primary Route" value={suggestedDepartment} tone="blue" />}
+        {secondaryDepartment && <ClassifyPill label="Secondary" value={secondaryDepartment} tone="purple" />}
+        {needsConsultation && <ClassifyPill label="Consultation" value={needsConsultation} tone={needsConsultation === 'Yes' ? 'amber' : 'slate'} />}
+        {needsSupervisorReview && <ClassifyPill label="Supervisor Review" value={needsSupervisorReview} tone={needsSupervisorReview === 'Yes' ? 'amber' : 'slate'} />}
+      </div>
+
+      {routingRationale && (
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+          <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Routing Rationale</p>
+          <p className="mt-1 text-sm leading-relaxed text-slate-700">{routingRationale}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RenderedEscalation({ payload }: { payload: Record<string, unknown> }) {
+  const primaryRecommendation = humanizeEnum(payload.primary_recommendation);
+  const alternatives = Array.isArray(payload.alternatives)
+    ? payload.alternatives.map((item) => humanizeEnum(item)).filter(Boolean)
+    : [];
+  const ambiguityExplanation = stringifyValue(payload.ambiguity_explanation);
+  const consultationNeeded = booleanLabel(payload.needs_consultation);
+  const consultationReason = stringifyValue(payload.consultation_reason);
+
+  return (
+    <div className="space-y-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+      <div className="flex flex-wrap gap-2">
+        {primaryRecommendation && <ClassifyPill label="Primary Recommendation" value={primaryRecommendation} tone="blue" />}
+        {consultationNeeded && <ClassifyPill label="Consultation Needed" value={consultationNeeded} tone={consultationNeeded === 'Yes' ? 'amber' : 'slate'} />}
+      </div>
+
+      {alternatives.length > 0 && (
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+          <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Alternatives</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {alternatives.map((item) => (
+              <span key={item} className="rounded-full border border-purple-200 bg-purple-50 px-3 py-1 text-xs font-bold text-purple-700">
+                {item}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {ambiguityExplanation && (
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+          <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Ambiguity Explanation</p>
+          <p className="mt-1 text-sm leading-relaxed text-slate-700">{ambiguityExplanation}</p>
+        </div>
+      )}
+
+      {consultationReason && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2">
+          <p className="text-[10px] font-black uppercase tracking-wider text-amber-600">Consultation Reason</p>
+          <p className="mt-1 text-sm leading-relaxed text-amber-900">{consultationReason}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RenderedClassification({ payload }: { payload: Record<string, unknown> }) {
+  const docType = humanizeEnum(payload.doc_type);
+  const urgency = humanizeEnum(payload.urgency);
+  const confidentiality = humanizeEnum(payload.confidentiality);
+  const issuingAgency = stringifyValue(payload.issuing_agency);
+  const rationale = stringifyValue(payload.rationale);
+
+  return (
+    <div className="space-y-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+      <div className="flex flex-wrap gap-2">
+        {docType && <ClassifyPill label="Type" value={docType} tone="blue" />}
+        {urgency && <ClassifyPill label="Urgency" value={urgency} tone="amber" />}
+        {confidentiality && <ClassifyPill label="Security" value={confidentiality} tone="slate" />}
+      </div>
+
+      {issuingAgency && (
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+          <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Issuing Agency</p>
+          <p className="mt-1 text-sm font-semibold text-slate-800">{issuingAgency}</p>
+        </div>
+      )}
+
+      {rationale && (
+        <div className="rounded-lg border border-blue-100 bg-white px-3 py-2">
+          <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Classification Rationale</p>
+          <p className="mt-1 text-sm leading-relaxed text-slate-700">{rationale}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ClassifyPill({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: 'blue' | 'amber' | 'slate' | 'purple';
+}) {
+  const tones = {
+    blue: 'border-blue-200 bg-blue-50 text-blue-800',
+    amber: 'border-amber-200 bg-amber-50 text-amber-800',
+    slate: 'border-slate-200 bg-slate-100 text-slate-700',
+    purple: 'border-purple-200 bg-purple-50 text-purple-800',
+  };
+
+  return (
+    <div className={`rounded-full border px-3 py-1.5 ${tones[tone]}`}>
+      <p className="text-[9px] font-black uppercase tracking-wider opacity-70">{label}</p>
+      <p className="text-sm font-bold">{value}</p>
+    </div>
+  );
+}
+
+function getRenderedRows(stage: string, payload: Record<string, unknown>) {
+  switch (stage) {
+    case 'classify':
+      return compactRows([
+        valueRow('Document Type', payload.doc_type),
+        valueRow('Issuing Agency', payload.issuing_agency),
+        valueRow('Urgency', payload.urgency),
+        valueRow('Confidentiality', payload.confidentiality),
+        valueRow('Rationale', payload.rationale),
+      ]);
+    case 'summarize':
+      return compactRows([
+        listRow('Summary Points', payload.summary_points),
+        valueRow('Key Subject', payload.key_subject),
+        listRow('Key Entities', payload.key_entities),
+      ]);
+    case 'route':
+      return compactRows([
+        valueRow('Suggested Department', payload.suggested_department),
+        valueRow('Secondary Department', payload.secondary_department),
+        valueRow('Routing Rationale', payload.routing_rationale),
+        valueRow('Needs Consultation', booleanLabel(payload.needs_consultation)),
+        valueRow('Needs Supervisor Review', booleanLabel(payload.needs_supervisor_review)),
+      ]);
+    case 'escalate':
+      return compactRows([
+        valueRow('Primary Recommendation', payload.primary_recommendation),
+        listRow('Alternatives', payload.alternatives),
+        valueRow('Ambiguity Explanation', payload.ambiguity_explanation),
+        valueRow('Consultation Needed', booleanLabel(payload.needs_consultation)),
+        valueRow('Consultation Reason', payload.consultation_reason),
+      ]);
+    default:
+      return objectRows(payload);
+  }
+}
+
+function compactRows<T>(rows: Array<T | null>): T[] {
+  return rows.filter((row): row is T => row !== null);
+}
+
+function valueRow(label: string, value: unknown) {
+  const text = stringifyValue(value);
+  if (!text) return null;
+  return { label, value: text };
+}
+
+function listRow(label: string, value: unknown) {
+  if (!Array.isArray(value)) return null;
+  const items = value.map((item) => stringifyValue(item)).filter(Boolean);
+  if (items.length === 0) return null;
+  return { label, items };
+}
+
+function objectRows(payload: Record<string, unknown>) {
+  return Object.entries(payload)
+    .map(([key, value]) => {
+      if (Array.isArray(value)) return listRow(formatKey(key), value);
+      return valueRow(formatKey(key), value);
+    })
+    .filter((row): row is { label: string; value?: string; items?: string[] } => row !== null);
+}
+
+function formatKey(key: string): string {
+  return key
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function stringifyValue(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  return '';
+}
+
+function booleanLabel(value: unknown): string {
+  if (typeof value !== 'boolean') return '';
+  return value ? 'Yes' : 'No';
+}
+
+function humanizeEnum(value: unknown): string {
+  const text = stringifyValue(value);
+  if (!text) return '';
+  return text
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function humanizeDepartment(value: string): string {
+  return humanizeEnum(value);
 }
 
 function ActionButton({

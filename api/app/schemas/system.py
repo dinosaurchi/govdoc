@@ -1,31 +1,46 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 from datetime import datetime
-from typing import Optional, Any, Dict
 
-class RoleBase(BaseModel):
+
+class RoleOut(BaseModel):
+    id: str
+    label: str
+    allowed_actions: list[str] = []
+
+    class Config:
+        from_attributes = True
+
+
+class DepartmentOut(BaseModel):
+    id: str
     name: str
-    description: Optional[str] = None
+    description: str | None = None
 
-class RoleOut(RoleBase):
-    id: int
-    model_config = ConfigDict(from_attributes=True)
+    class Config:
+        from_attributes = True
 
-class DepartmentBase(BaseModel):
+
+class PromptVersionOut(BaseModel):
+    id: str
+    stage: str
+    file_path: str
+    label: str | None = None
+    registered_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class DemoScenarioOut(BaseModel):
+    id: str
     name: str
-    code: str
+    description: str | None = None
+    document_id: str | None = None
+    category: str | None = None
 
-class DepartmentOut(DepartmentBase):
-    id: int
-    model_config = ConfigDict(from_attributes=True)
+    class Config:
+        from_attributes = True
 
-class AuditEventOut(BaseModel):
-    id: int
-    document_id: Optional[int]
-    actor_role_id: int
-    action: str
-    details: Optional[Dict[str, Any]]
-    timestamp: datetime
-    model_config = ConfigDict(from_attributes=True)
 
 class DashboardMetrics(BaseModel):
     total_received: int

@@ -1,4 +1,4 @@
-# Slim install for Docker images (no pytest; keep httpx for health checks if needed)
+# Slim install for Docker images (no test/dev tools)
 fastapi
 uvicorn
 sqlalchemy
@@ -7,3 +7,9 @@ pydantic-settings
 python-multipart
 alembic
 httpx
+openai
+pypdf
+python-docx
+Pillow
+pdf2image
+pyyaml

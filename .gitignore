@@ -12,9 +12,13 @@ venv/
 .venv/
 *.db
 .pytest_cache/
-data/
+data/*
+!data/.gitkeep
 deploy/artifacts/
 deploy/bundle/
 .claude/
 web/dist/
 .secrets/
+web/test-results
+test-results/
+.ai/tmp

@@ -8,34 +8,43 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1",
-        ]
-      interval: 5s
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/"]
+      interval: 10s
       timeout: 5s
-      retries: 12
-      start_period: 25s
+      retries: 5
 
   api:
     build:
-      context: ./api
-      dockerfile: ../deploy/Dockerfile.api
+      context: .
+      dockerfile: deploy/Dockerfile.api
     ports:
       - "${APP_PORT:-8000}:8000"
+    env_file:
+      - .env
     environment:
-      - DATABASE_URL=sqlite:///./data/secureflow.db
+      # Container-specific overrides (win over .env values)
+      - API_BASE_URL=http://api:8000
+      - DATABASE_URL=sqlite:////app/data/secureflow.db
+      - LOCAL_FILE_STORAGE_ROOT=data/uploads
+      - MODELS_CONFIG_PATH=api/config/models.yaml
+      - ROLES_CONFIG_PATH=api/config/roles.yaml
+      - PROMPT_CONFIG_PATH=api/prompts
     volumes:
       - ./data:/app/data
-    command:
-      - sh
-      - -c
-      - mkdir -p /app/data && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health/ready"]
-      interval: 5s
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/readyz')"]
+      interval: 10s
       timeout: 5s
-      retries: 12
-      start_period: 20s
+      retries: 5
+      start_period: 15s

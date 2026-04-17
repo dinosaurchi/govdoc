@@ -1,146 +1,222 @@
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.api import deps
-from app.api.role_util import get_role_id_by_name
-from app.models.document import AIAnalysis, DocumentType, WorkflowState
-from app.repositories import document as doc_repo
-from app.schemas.document import DocumentCreate, DocumentOut
-from app.services.ai.interface import AIProviderInterface
-from app.services.audit_service import write_audit_event
-from app.services.extraction.interface import ExtractionProviderInterface
-from app.services.intake_service import process_document_upload
-from app.services.workflow import WorkflowService
+from app.api.deps import CurrentRole
+from app.models.document import Document, ExtractedArtifact
+from app.repositories.document import DocumentRepository
+from app.schemas.document import DocumentListOut, DocumentDetailOut, UploadResponse
+from app.services.ai.interface import AIProvider
+from app.services.intake_service import IntakeService
+from app.services.file_validation import FileValidationError
+from app.services.storage import LocalFileStorage
 
 router = APIRouter()
 
 
-def _parse_doc_type(raw: Optional[str]) -> DocumentType:
-    if not raw:
-        return DocumentType.cong_van
-    mapping = {
-        "công văn": DocumentType.cong_van,
-        "quyết định": DocumentType.quyet_dinh,
-        "thông báo": DocumentType.thong_bao,
-        "tờ trình": DocumentType.to_trinh,
-        "báo cáo": DocumentType.bao_cao,
-        "cong_van": DocumentType.cong_van,
-        "quyet_dinh": DocumentType.quyet_dinh,
-        "thong_bao": DocumentType.thong_bao,
-        "to_trinh": DocumentType.to_trinh,
-        "bao_cao": DocumentType.bao_cao,
-    }
-    key = raw.strip().lower()
-    if key in mapping:
-        return mapping[key]
-    try:
-        return DocumentType(raw)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid doc_type: {raw}")
+@router.get("/", response_model=List[DocumentListOut])
+def get_documents(
+    status: Optional[str] = None,
+    department_id: Optional[str] = None,
+    q: Optional[str] = None,
+    db: Session = Depends(deps.get_db),
+    role: CurrentRole = Depends(deps.get_current_role),
+):
+    repo = DocumentRepository(db)
+    docs = repo.list(status=status, department_id=department_id, q=q)
+    return docs
 
 
-@router.get("/", response_model=List[DocumentOut])
-def get_documents(db: Session = Depends(deps.get_db)):
-    return doc_repo.document.get_multi(db, limit=200)
-
-
-@router.post("/", response_model=DocumentOut)
+@router.post("/", response_model=UploadResponse)
 async def create_document(
-    obj_in: DocumentCreate,
-    db: Session = Depends(deps.get_db),
-    role: str = Depends(deps.get_current_role),
-):
-    actor_id = get_role_id_by_name(db, role)
-    doc = doc_repo.document.create(db, obj_in=obj_in)
-    write_audit_event(
-        db,
-        document_id=doc.id,
-        actor_role_id=actor_id,
-        action="DOCUMENT_CREATE_JSON",
-        details={"title": doc.title},
-    )
-    return doc_repo.document.get_with_relations(db, id=doc.id)
-
-
-@router.post("/upload", response_model=DocumentOut)
-async def upload_document(
-    db: Session = Depends(deps.get_db),
-    role: str = Depends(deps.get_current_role),
-    extractor: ExtractionProviderInterface = Depends(deps.get_extraction_provider),
+    request: Request,
     file: UploadFile = File(...),
-    title: Optional[str] = Form(None),
-    doc_type: Optional[str] = Form(None),
+    db: Session = Depends(deps.get_db),
+    role: CurrentRole = Depends(deps.get_current_role),
+    ai_provider: AIProvider = Depends(deps.get_ai_provider),
 ):
-    dt = _parse_doc_type(doc_type)
-    doc = await process_document_upload(
-        db,
-        upload=file,
-        title=title,
-        doc_type=dt,
-        role_name=role,
-        extractor=extractor,
+    """Upload a document file: validate, store, extract text, run AI analysis."""
+    content = await file.read()
+    filename = file.filename or "upload.bin"
+    mime_type = file.content_type
+
+    prompt_registry = getattr(request.app.state, "prompt_registry", None)
+
+    svc = IntakeService(db)
+    try:
+        result = svc.intake(
+            filename, content, mime_type, role.id,
+            ai_provider=ai_provider, prompt_registry=prompt_registry,
+        )
+    except FileValidationError:
+        raise  # handled by global exception handler in main.py
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "PERSISTENCE_FAILED", "message": str(e), "details": {}}},
+        )
+
+    doc = result["document"]
+    artifact = result.get("artifact")
+    ai_analyses = result.get("ai_analyses", [])
+
+    # Refresh to get DB-populated defaults
+    db.commit()
+    db.refresh(doc)
+    if artifact:
+        db.refresh(artifact)
+
+    # Refresh analysis objects so created_at etc. are populated
+    refreshed_analyses = []
+    for a in ai_analyses:
+        db.refresh(a)
+        refreshed_analyses.append(a)
+
+    return UploadResponse(
+        document=doc,
+        extracted_artifact=artifact,
+        ai_analyses=refreshed_analyses,
     )
-    return doc_repo.document.get_with_relations(db, id=doc.id)
 
 
-@router.get("/{doc_id}", response_model=DocumentOut)
-def get_document(doc_id: int, db: Session = Depends(deps.get_db)):
-    doc = doc_repo.document.get_with_relations(db, id=doc_id)
+@router.get("/{doc_id}", response_model=DocumentDetailOut)
+def get_document(doc_id: str, db: Session = Depends(deps.get_db), role: CurrentRole = Depends(deps.get_current_role)):
+    from app.models.document import DocumentStatus
+    from app.services.audit_service import write_audit_event
+
+    repo = DocumentRepository(db)
+    doc = repo.get_with_relations(doc_id)
     if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "Document not found", "details": {}}},
+        )
+
+    # Implicit transition: reviewer/supervisor reading a `routed` doc claims it → under_review
+    # (per implementation plan §3.4: "reviewer opens record (implicit on read by reviewer role)")
+    if doc.status == DocumentStatus.routed and role.has_action("documents.approve_routing"):
+        doc.status = DocumentStatus.under_review
+        if not doc.assigned_reviewer_role:
+            doc.assigned_reviewer_role = role.id
+        write_audit_event(
+            db,
+            document_id=doc.id,
+            actor_role=role.id,
+            event_type="workflow.transition",
+            from_state="routed",
+            to_state="under_review",
+        )
+        db.commit()
+        db.refresh(doc)
+
     return doc
 
 
-@router.post("/{doc_id}/analyze", response_model=DocumentOut)
-async def analyze_document(
-    doc_id: int,
-    db: Session = Depends(deps.get_db),
-    ai: AIProviderInterface = Depends(deps.get_ai_provider),
-    role: str = Depends(deps.get_current_role),
+@router.get("/{doc_id}/file")
+def get_document_file(
+    doc_id: str, db: Session = Depends(deps.get_db), role: CurrentRole = Depends(deps.get_current_role)
 ):
-    doc = doc_repo.document.get_with_relations(db, id=doc_id)
+    """Stream raw file from storage."""
+    repo = DocumentRepository(db)
+    doc = repo.get(doc_id)
     if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-
-    if doc.analysis is not None:
         raise HTTPException(
-            status_code=409,
-            detail="This document already has an AI analysis record; re-run is not supported in baseline",
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "Document not found", "details": {}}},
+        )
+    if not doc.files:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "No file attached to document", "details": {}}},
         )
 
-    wf = WorkflowService(db)
-    wf.ensure_transition_allowed(doc.state, WorkflowState.routed_pending_human_review)
+    doc_file = doc.files[0]
+    storage = LocalFileStorage()
+    try:
+        content = storage.read(doc_file.storage_key)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "File not found in storage", "details": {}}},
+        )
 
-    analysis_data = await ai.analyze_document("Mock context for doc")
-
-    actor_id = get_role_id_by_name(db, role)
-
-    analysis_obj = AIAnalysis(
-        document_id=doc.id,
-        suggested_type=analysis_data["suggested_type"],
-        urgency_score=analysis_data["urgency_score"],
-        summary=analysis_data["summary"],
-        suggested_department=analysis_data["suggested_department"],
-        raw_response='{"mock": true}',
-        analysis_source_label=getattr(ai, "source_label", None) or type(ai).__name__,
-    )
-    db.add(analysis_obj)
-
-    doc.state = WorkflowState.routed_pending_human_review
-    db.add(doc)
-    db.commit()
-    db.refresh(doc)
-
-    write_audit_event(
-        db,
-        document_id=doc.id,
-        actor_role_id=actor_id,
-        action="ANALYZE",
-        details={
-            "suggested_department": analysis_data.get("suggested_department"),
-            "analysis_source": analysis_obj.analysis_source_label,
-        },
+    return Response(
+        content=content,
+        media_type=doc_file.mime_type,
+        headers={"Content-Disposition": f'attachment; filename="{doc_file.original_filename}"'},
     )
 
-    return doc_repo.document.get_with_relations(db, id=doc_id)
+
+@router.post("/{doc_id}/analyze")
+async def re_analyze_document(
+    doc_id: str,
+    request: Request,
+    force: bool = Query(False),
+    db: Session = Depends(deps.get_db),
+    role: CurrentRole = Depends(deps.require_action("documents.analyze")),
+    ai_provider: AIProvider = Depends(deps.get_ai_provider),
+):
+    """Re-run AI analysis on a document (classify → summarize → route → optional escalate)."""
+    from app.services.ai.analysis_service import AnalysisService
+
+    repo = DocumentRepository(db)
+    document = repo.get_with_relations(doc_id)
+    if not document:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "Document not found", "details": {}}},
+        )
+
+    prompt_registry = getattr(request.app.state, "prompt_registry", None)
+    analysis_svc = AnalysisService(db, ai_provider, prompt_registry=prompt_registry)
+
+    try:
+        analyses = analysis_svc.re_analyze(document, role.id, force=force)
+        db.commit()
+        # Refresh to populate relationships
+        db.refresh(document)
+        for a in analyses:
+            db.refresh(a)
+        return {"document": document, "ai_analyses": analyses}
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"code": "EXTRACTION_FAILED", "message": str(e), "details": {}}},
+        )
+
+
+@router.get("/{document_id}/evidence")
+async def get_document_evidence(
+    document_id: str,
+    role: CurrentRole = Depends(deps.get_current_role),
+    db: Session = Depends(deps.get_db),
+):
+    """Get evidence/references for an analyzed document."""
+    document = db.query(Document).filter(Document.id == document_id).first()
+    if not document:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "Document not found", "details": {}}},
+        )
+
+    # Get text from latest artifact
+    artifact = (
+        db.query(ExtractedArtifact)
+        .filter(ExtractedArtifact.document_id == document_id)
+        .order_by(ExtractedArtifact.extracted_at.desc())
+        .first()
+    )
+
+    if not artifact:
+        return {"results": []}
+
+    from app.main import app
+
+    retrieval_svc = getattr(app.state, "retrieval_service", None)
+    if not retrieval_svc:
+        return {"results": []}
+
+    results = retrieval_svc.search(artifact.text[:2000], top_k=5)
+    return {"document_id": document_id, "results": results}

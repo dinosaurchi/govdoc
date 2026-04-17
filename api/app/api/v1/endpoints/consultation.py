@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api import deps
-from app.api.role_util import get_role_id_by_name
+from app.api.deps import CurrentRole
 from app.services.workflow import WorkflowService
 
 router = APIRouter()
@@ -20,28 +20,44 @@ async def list_active_consultations(db: Session = Depends(deps.get_db)):
 
 @router.post("/{doc_id}/notes")
 async def add_consultation_note(
-    doc_id: int,
+    doc_id: str,
     body: ConsultationNoteBody,
     db: Session = Depends(deps.get_db),
-    role: str = Depends(deps.get_current_role),
+    role: CurrentRole = Depends(deps.get_current_role),
 ):
-    if role not in ["Department Reviewer", "Consultant", "Supervisor"]:
-        raise HTTPException(status_code=403, detail="Not authorized to add consultation notes")
+    if role.id not in ["reviewer", "consultant", "supervisor"]:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": {
+                    "code": "FORBIDDEN_ACTION",
+                    "message": "Not authorized to add consultation notes",
+                    "details": {},
+                }
+            },
+        )
 
-    actor_id = get_role_id_by_name(db, role)
     workflow = WorkflowService(db)
-    return await workflow.add_consultation(doc_id, actor_id, body.content)
+    return await workflow.add_consultation(doc_id, role.id, body.content)
 
 
 @router.post("/{doc_id}/complete")
 async def complete_consultation(
-    doc_id: int,
+    doc_id: str,
     db: Session = Depends(deps.get_db),
-    role: str = Depends(deps.get_current_role),
+    role: CurrentRole = Depends(deps.get_current_role),
 ):
-    if role not in ["Consultant", "Department Reviewer", "Supervisor"]:
-        raise HTTPException(status_code=403, detail="Not authorized to complete consultation")
+    if role.id not in ["consultant", "reviewer", "supervisor"]:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": {
+                    "code": "FORBIDDEN_ACTION",
+                    "message": "Not authorized to complete consultation",
+                    "details": {},
+                }
+            },
+        )
 
-    actor_id = get_role_id_by_name(db, role)
     workflow = WorkflowService(db)
-    return await workflow.complete_consultation(doc_id, actor_id)
+    return await workflow.complete_consultation(doc_id, role.id)

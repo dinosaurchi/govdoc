@@ -1,8 +1,33 @@
 FROM python:3.12-alpine
+
+# Install system dependencies
+RUN apk add --no-cache \
+    gcc \
+    musl-dev \
+    poppler-utils \
+    tiff-dev \
+    jpeg-dev \
+    zlib-dev \
+    freetype-dev \
+    lcms2-dev \
+    openjpeg-dev
+
 WORKDIR /app
-RUN apk add --no-cache curl
-COPY requirements-runtime.txt requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
+
+# Install Python dependencies
+COPY api/requirements-runtime.txt api/requirements.txt /app/api/
+RUN pip install --no-cache-dir -r /app/api/requirements.txt
+
+# Copy application code — preserve api/ subdirectory so path resolution works
+COPY api/ /app/api/
+COPY data/ /app/demo-data/
+
+# Ensure Python can find the 'app' package inside api/
+ENV PYTHONPATH=/app/api
+
+# Create data directories
+RUN mkdir -p /app/data/uploads /app/data/cached_ai
+
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+CMD ["sh", "-c", "cd /app/api && alembic upgrade head || { echo 'Resetting stale database…' && rm -f /app/data/secureflow.db && alembic upgrade head; } && cd /app && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
