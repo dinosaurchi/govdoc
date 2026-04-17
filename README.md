@@ -68,7 +68,7 @@ See **`.env.example`** for the full contract. Highlights:
 
 - **Database / CORS / storage:** `DATABASE_URL`, `ALLOWED_ORIGINS`, `LOCAL_FILE_STORAGE_ROOT`
 - **Demo toggles:** `ENABLE_DEMO_MODE`, `ENABLE_CACHED_AI_RESULTS`, etc. (baseline behavior is still mock-driven)
-- **Model Studio (for future live AI):** `MODELSTUDIO_API_KEY`, `MODELSTUDIO_BASE_URL`, model name variables — required for **`make check-credentials`** env validation once you fill them
+- **Model Studio (for future live AI):** `MODELSTUDIO_API_KEY`, `MODELSTUDIO_BASE_URL`, `MODELSTUDIO_DASHSCOPE_URL` — required for **`make check-credentials`** env validation once you fill them. Model ids (qwen-plus, qwen-max, text-embedding-v4, qwen-vl-plus, qwen3-rerank) live in `api/config/models.yaml`, not env.
 - **Remote packaging contract:** `REMOTE_HOST`, `REMOTE_USER`, `REMOTE_APP_DIR` — required for `make up-remote` (see `scripts/remote_up.sh`)
 
 ## Demo data and scenarios

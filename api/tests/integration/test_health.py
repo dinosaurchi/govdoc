@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 
-@pytest.mark.integration
+@pytest.mark.mock_integration
 def test_health_liveness():
     with TestClient(app) as client:
         r = client.get("/health")
@@ -12,7 +12,7 @@ def test_health_liveness():
         assert r.json().get("status") == "healthy"
 
 
-@pytest.mark.integration
+@pytest.mark.mock_integration
 def test_health_readiness():
     with TestClient(app) as client:
         r = client.get("/health/ready")

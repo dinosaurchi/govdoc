@@ -1,9 +1,16 @@
 # GovDoc SecureFlow — Multi-Pass Test Plan
 
-Version: 1.0  
+Version: 1.1  
 Status: Verification handoff note  
 Primary input: `govdoc_source_of_truth_plan_v1_1.md`  
-Paired with: `govdoc_implementation_plan.md`
+Paired with: `govdoc_implementation_plan.md` (v1.1)
+
+Changelog since 1.0:
+- Committed to Playwright (removed "or equivalent").
+- Added `make test-e2e` intent block (§4.1) and expanded remote QA checklist with concrete commands (§12).
+- Rephrased AI quality thresholds as ratios and added `summary_expectations.jsonl` schema (§7.3, §7.3.1).
+- Split `integration` marker into `mock_integration` (CI-safe) and `live_integration` (gated); pinned `conftest.py` location to `api/tests/conftest.py` (§18.1).
+- Added RBAC (role × endpoint) matrix requirement (Pass 6) and retrieval quality thresholds + prompt-version traceability test (Pass 7).
 
 ---
 
@@ -108,7 +115,7 @@ Measure:
 - out-of-scope handling
 
 ### Layer G — End-to-end UI tests
-Playwright or equivalent:
+Playwright:
 - hero flow
 - ambiguity flow
 - scan flow
@@ -156,7 +163,15 @@ Must verify:
 Must run live AI quality evaluation against the bundled data pack and produce machine-readable results.
 
 #### `make test-e2e`
-Must run browser/UI flows against local docker-compose environment.
+Must run the Playwright suite (`web/tests-e2e/`) against the running local docker-compose environment.
+
+Preconditions:
+- `make up` must have completed (`readyz` returns healthy) before `make test-e2e` starts.
+- If the stack is not reachable at `http://localhost:${WEB_PORT}`, the target must fail fast without running tests.
+
+Outputs:
+- `data/e2e-report/` HTML report.
+- `data/e2e-report/screenshots/` on failure.
 
 #### `make qa`
 Must run smoke checks after `make up`.
@@ -344,6 +359,29 @@ Use bundled scan fixtures to verify:
 - role-based actions enforced
 - closeout state reachable only through valid workflow path
 
+### RBAC endpoint matrix (required)
+
+A parametrized test (`test_rbac_matrix.py`) must assert the full (role × endpoint) matrix for every protected endpoint listed in implementation plan §Pass 6. For each cell the test sends the request with `X-GovDoc-Role: <role>` and asserts either `allowed` (non-2xx only for unrelated reasons) or `forbidden` (403 `FORBIDDEN_ACTION`).
+
+Minimum matrix (expand as new endpoints are added):
+
+| Endpoint | intake_clerk | reviewer | supervisor |
+|---|---|---|---|
+| `POST /documents` (upload) | allow | allow | allow |
+| `POST /documents/{id}/analyze` | deny | deny | allow |
+| `POST /documents/{id}/approve-routing` | deny | allow | allow |
+| `POST /documents/{id}/reroute` | deny | allow | allow |
+| `POST /documents/{id}/request-consultation` | deny | allow | allow |
+| `POST /documents/{id}/resolve-consultation/*` | deny | allow | allow |
+| `POST /documents/{id}/escalate` | deny | deny | allow |
+| `POST /documents/{id}/mark-out-of-scope` | deny | allow | allow |
+| `POST /documents/{id}/close` | deny | deny | allow |
+| `POST /demo/reset` | deny | deny | allow (dev env only) |
+
+Missing / unknown role tests:
+- no `X-GovDoc-Role` header → `400 MISSING_ROLE_HEADER`
+- `X-GovDoc-Role: ghost` → `403 UNKNOWN_ROLE`
+
 ---
 
 ## Pass 7 verification — Retrieval, evidence panel, prompt versioning, demo mode
@@ -365,6 +403,19 @@ Use bundled scan fixtures to verify:
 - evidence panel is populated for at least seeded scenarios
 - cached/live distinction is test-covered
 - retrieval failure does not silently fake good evidence
+
+### Retrieval quality thresholds
+
+- Default `top_k = 5` for `POST /retrieval/search` tests.
+- For each seeded scenario with a labeled relevant reference, the relevant chunk must appear in the top-k returned list (**recall@5 = 1.00** on the seeded set).
+- Reranked score ordering must be strictly non-increasing: `scores[i] >= scores[i+1]` for all `i`.
+- For a handcrafted pair (one near-duplicate, one unrelated), the cosine similarity gap must exceed `0.15` to catch embedding-endpoint regressions.
+
+### Prompt version traceability test
+
+- Hash two distinct prompt files; assert both ids are registered and distinct.
+- Modify one prompt file by a single byte, reload the registry, assert a new hash id appears.
+- Assert every `ai_analysis` row written during integration tests carries a `prompt_version` present in the registry.
 
 ---
 
@@ -440,18 +491,36 @@ Measure:
 
 ### 7.3 Initial bootstrap thresholds
 
-These are practical hackathon thresholds for the bootstrap corpus:
+These are practical hackathon thresholds. They are expressed as **ratios over the evaluated subset** rather than absolute counts so they remain valid as the bundled corpus grows or shrinks. The actual subset size is read from `data/labels/*.jsonl` at test time and recorded in the report.
 
 - classification exact-match on in-scope docs: **>= 0.70**
 - routing top-1 on labeled cases: **>= 0.60**
 - routing top-2 on labeled cases: **>= 0.80**
 - summary schema validity: **1.00**
 - summary coverage score: **>= 0.70**
-- OCR non-empty extraction on scan fixtures: **>= 7/8**
-- ambiguity flagging on multi-department hard cases: **>= 5/6**
-- out-of-scope honesty on out-of-scope cases: **>= 4/6**
+- OCR non-empty extraction on scan fixtures: **>= 0.85**
+- ambiguity flagging on multi-department hard cases: **>= 0.80**
+- out-of-scope honesty on out-of-scope cases: **>= 0.65**
 
-These are minimum thresholds, not final aspirational ceilings.
+The generated report must include both the ratio and the absolute numerator/denominator (e.g. `0.875 (7/8)`). These are minimum thresholds, not final aspirational ceilings.
+
+### 7.3.1 Expected-points label file
+
+Summary coverage is computed against `data/labels/summary_expectations.jsonl`, one JSON object per line:
+
+```json
+{
+  "doc_id": "hero-001",
+  "expected_points": ["decision authority", "effective date", "affected agencies"],
+  "min_coverage": 0.7
+}
+```
+
+- `doc_id`: matches the `document.id` of a seeded scenario document.
+- `expected_points`: list of short Vietnamese/English phrases that should appear (substring, case-insensitive) across the generated `summary_points`.
+- `min_coverage`: per-document override; falls back to §7.3 if absent.
+
+Missing label file → `make test-ai` treats summary coverage as "not evaluated" and logs a warning; it does not hard-fail on coverage alone unless the file exists.
 
 ### 7.4 Reporting format
 
@@ -519,7 +588,7 @@ At minimum, integration tests must exist for:
 
 ## 10) Required E2E/UI scenarios
 
-At minimum, Playwright or equivalent must cover:
+At minimum, Playwright must cover:
 
 ### Scenario 1 — Hero flow
 - open app
@@ -570,12 +639,14 @@ At minimum, Playwright or equivalent must cover:
 
 After `make up-remote`, verify:
 
-- remote containers running
-- remote health endpoint healthy
-- remote UI reachable from expected port/domain
-- one API smoke request passes
-- one seeded scenario visible
-- logs retrievable on remote host
+- remote containers running: `ssh ${REMOTE_USER}@${REMOTE_HOST} "cd ${REMOTE_APP_DIR} && docker compose ps --format json"` — all services `running`/`healthy`
+- remote health endpoint healthy: `curl -fsS http://${REMOTE_HOST}:${APP_PORT}/readyz` returns 200 with `{"status":"ok"}`
+- remote UI reachable: `curl -fsS http://${REMOTE_HOST}:${WEB_PORT}/` returns 200 and contains the app title
+- one API smoke request passes: `curl -fsS -H "X-GovDoc-Role: intake_clerk" http://${REMOTE_HOST}:${APP_PORT}/meta/roles` returns the seeded role list
+- one seeded scenario visible: `GET /demo/scenarios` returns at least the `hero` scenario
+- logs retrievable: `ssh ${REMOTE_USER}@${REMOTE_HOST} "cd ${REMOTE_APP_DIR} && docker compose logs --tail 200 --no-color"` streams without error and is captured to `data/remote-qa/logs-<timestamp>.txt` by the caller
+
+Each check above is a discrete step in `scripts/remote_qa.sh`. Any non-zero step fails the deploy; the script prints the failing step id and the captured output path.
 
 If any check fails, `make up-remote` must exit non-zero.
 
@@ -673,15 +744,18 @@ This section is concrete and prescriptive, derived from the validated `alibaba-a
 
 ---
 
-### 18.1 pytest marker setup (`tests/conftest.py`)
+### 18.1 pytest marker setup (`api/tests/conftest.py`)
+
+The conftest lives at `api/tests/conftest.py` (the api-side pytest root). Playwright E2E tests live under `web/tests-e2e/` and are run via `npx playwright test`, not pytest.
 
 ```python
 def pytest_configure(config):
     config.addinivalue_line("markers", "unit: unit tests (no external API)")
     config.addinivalue_line("markers", "contract: contract tests (no external API)")
+    config.addinivalue_line("markers", "mock_integration: app-level integration with stubbed AI adapter (no external API)")
     config.addinivalue_line("markers", "live: live API tests (requires credentials)")
     config.addinivalue_line("markers", "creds: credential validation tests")
-    config.addinivalue_line("markers", "integration: integration tests (requires credentials)")
+    config.addinivalue_line("markers", "live_integration: full pipeline with real API (requires credentials)")
 
 def pytest_addoption(parser):
     parser.addoption("--live", action="store_true", default=False)
@@ -694,13 +768,20 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(pytest.mark.skip(reason="Need --live flag"))
         if "creds" in item.keywords and not config.getoption("--creds", default=False):
             item.add_marker(pytest.mark.skip(reason="Need --creds flag"))
-        if "integration" in item.keywords and not config.getoption("--integration", default=False):
+        if "live_integration" in item.keywords and not config.getoption("--integration", default=False):
             item.add_marker(pytest.mark.skip(reason="Need --integration flag"))
 ```
 
-`make test` runs with no flags — never calls external API.  
-`make check-credentials` runs pytest with `--creds`.  
-`make test-ai` runs pytest with `--live --integration`.
+**Marker routing:**
+
+| Target | Markers included | External API? |
+|---|---|---|
+| `make test` | `unit`, `contract`, `mock_integration` | No |
+| `make ci` | same as `make test` (+ lint, build) | No |
+| `make check-credentials` | `creds` only (pytest `--creds`) | Yes |
+| `make test-ai` | `live`, `live_integration` (pytest `--live --integration`) | Yes |
+
+`mock_integration` tests must use the FastAPI dependency-override mechanism to swap the Model Studio adapter for a deterministic stub. They run in CI.
 
 ---
 
@@ -806,7 +887,7 @@ File: `api/tests/test_live_api.py` marked `@pytest.mark.live`
 
 ### 18.5 Integration pipeline tests (requires `--integration`)
 
-File: `api/tests/test_ai_pipeline.py` marked `@pytest.mark.integration`
+File: `api/tests/test_ai_pipeline.py` marked `@pytest.mark.live_integration`
 
 **Classification pipeline**
 - Extract text from fixture `cong_van` → classify → `doc_type` is one of 6 valid types → `confidence > 0.5`

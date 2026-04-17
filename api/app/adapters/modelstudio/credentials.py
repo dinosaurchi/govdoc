@@ -24,9 +24,7 @@ class LiveCredentialProbeNotImplementedError(RuntimeError):
 REQUIRED_FOR_PROBE: Sequence[str] = (
     "MODELSTUDIO_API_KEY",
     "MODELSTUDIO_BASE_URL",
-    "MODEL_CLASSIFY",
-    "MODEL_EMBED",
-    "MODEL_OCR",
+    "MODELSTUDIO_DASHSCOPE_URL",
 )
 
 

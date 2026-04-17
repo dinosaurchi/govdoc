@@ -1,9 +1,17 @@
 # GovDoc SecureFlow — Multi-Pass Implementation Plan
 
-Version: 1.0  
+Version: 1.1  
 Status: Implementation handoff note  
 Primary input: `govdoc_source_of_truth_plan_v1_1.md`  
 Scope: turn the existing Google AI Studio baseline (real frontend + backend, mocked business logic) into a real, testable MVP with Alibaba Model Studio integration, demo mode, and deterministic QA/deployment paths.
+
+Changelog since 1.0:
+- Locked the stack (§3.1), role simulation contract (§3.2), and synchronous pipeline model (§3.3).
+- Dropped `MODEL_*` env vars; models live only in `config/models.yaml`. Added `MODELSTUDIO_DASHSCOPE_URL`, `MODELS_CONFIG_PATH`, `ROLES_CONFIG_PATH`, `CACHED_AI_STORAGE_ROOT` (§6.1).
+- Added entity field schema (Pass 1) and API endpoint inventory (Pass 6).
+- Clarified `extraction_method` values (§17.4), locked credential-check return keys (§17.7), split integration marker into `mock_integration` / `live_integration` (§17.9).
+- Added prompt versioning scheme (§17.10), cached AI storage layout (§17.11), fence-stripping helper contract (§17.12).
+- Added `make test-ai` and `make test-e2e` intent blocks (§5.1).
 
 ---
 
@@ -69,6 +77,52 @@ This plan assumes the baseline repo already contains:
 - docker-based local development possible or at least scaffolded
 
 If the baseline diverges materially from the source-of-truth structure, fix the structure first instead of layering new logic on top of wrong entities.
+
+### 3.1 Committed stack
+
+The stack is fixed for this phase. Do not introduce alternatives.
+
+**Backend (`api/`)**
+- Python 3.11
+- FastAPI (ASGI via uvicorn)
+- SQLAlchemy 2.x + Alembic (migrations)
+- SQLite, single file at `data/govdoc.db` (WAL mode)
+- Pydantic v2 (request/response + AI schemas)
+- `openai` SDK (for OpenAI-compatible endpoints)
+- `httpx` (for DashScope rerank endpoint)
+- `pypdf` (born-digital extraction)
+- `pdf2image` + `poppler-utils` (scan render)
+- `pytest` + `pytest-asyncio`
+
+**Frontend (`web/`)**
+- React 19
+- Vite 6
+- React Router v7
+- TypeScript
+- Playwright (E2E)
+
+**Shared**
+- docker-compose (web + api + optional reverse proxy)
+- Make (developer entrypoint)
+
+### 3.2 Role simulation contract
+
+- No auth, no sessions, no tokens.
+- Every protected API request must carry header `X-GovDoc-Role: <role_id>`.
+- Allowed role ids are seeded and loaded from `config/roles.yaml`.
+- FastAPI dependency resolves the header into a `CurrentRole` object used by every route.
+- Missing header on a protected route → `400 MISSING_ROLE_HEADER`.
+- Unknown role id → `403 UNKNOWN_ROLE`.
+- Role is the only identity input; no per-user records in MVP.
+- Audit events record the role id verbatim.
+
+### 3.3 Pipeline execution model
+
+- AI analysis is **synchronous** for MVP.
+- Upload flow: `POST /documents` persists the raw file and `document` row, then (in the same request) runs deterministic extraction and the AI analysis pipeline, then returns the created `document` + `ai_analysis` payload.
+- On any pipeline failure, the request returns non-2xx with an explicit error class and the document is marked `status="ingest_failed"`; no partial success is reported as success.
+- Re-analysis is triggered by explicit `POST /documents/{id}/analyze` (idempotent per prompt version).
+- No background worker, no task queue, no Celery/RQ in this phase.
 
 ---
 
@@ -149,6 +203,12 @@ Run docker-compose locally and block on health checks.
 #### `make qa`
 Run local API/UI smoke checks after `make up`.
 
+#### `make test-ai`
+Run live AI quality evaluation against the bundled data pack. Invokes pytest with `--live --integration` and produces `data/ai_quality_report.json` + a human-readable markdown summary. Requires valid Model Studio credentials. Exits non-zero on hard-fail thresholds (see test plan §7.5).
+
+#### `make test-e2e`
+Run the Playwright suite (`web/tests-e2e/`) against the running local docker-compose stack. Requires `make up` to have completed successfully. Fails fast if the stack is not reachable.
+
 #### `make up-remote`
 Build images locally, export them, transfer them to remote host with `rsync`, load them on remote host, deploy with docker compose, and run remote health checks.
 
@@ -167,23 +227,22 @@ At minimum:
 - `WEB_PORT`
 - `API_BASE_URL`
 - `MODELSTUDIO_API_KEY`
-- `MODELSTUDIO_BASE_URL`
-- `MODEL_CLASSIFY`
-- `MODEL_ROUTE`
-- `MODEL_SUMMARIZE`
-- `MODEL_ESCALATE`
-- `MODEL_OCR`
-- `MODEL_EMBED`
-- `MODEL_RERANK`
+- `MODELSTUDIO_BASE_URL` (OpenAI-compatible endpoint)
+- `MODELSTUDIO_DASHSCOPE_URL` (DashScope endpoint, used by rerank)
+- `MODELS_CONFIG_PATH` (defaults to `api/config/models.yaml`)
+- `ROLES_CONFIG_PATH` (defaults to `api/config/roles.yaml`)
 - `ENABLE_DEMO_MODE`
 - `ENABLE_CACHED_AI_RESULTS`
 - `ENABLE_LIVE_OCR`
 - `ENABLE_LIVE_EMBEDDINGS`
 - `LOCAL_FILE_STORAGE_ROOT`
 - `PROMPT_CONFIG_PATH`
+- `CACHED_AI_STORAGE_ROOT` (defaults to `data/cached_ai`)
 - `REMOTE_HOST`
 - `REMOTE_USER`
 - `REMOTE_APP_DIR`
+
+**Model names are not env vars.** All model ids live in `config/models.yaml` (see §17.2/§17.6). This keeps the model → role mapping in one place and prevents env drift.
 
 ### 6.2 Fail-fast configuration rules
 
@@ -287,6 +346,99 @@ Implement the real domain model and workflow state machine.
 - role switcher changes allowed actions and view shape
 - no direct frontend-only permissions; backend validates too
 - seed scenarios load cleanly from fixtures
+
+### Entity field schema
+
+All entities use UUID string primary keys (`id`) and timestamptz `created_at` / `updated_at` unless noted. Field types are SQLAlchemy-flavored.
+
+**document**
+- `id: str (UUID)`
+- `title: str`
+- `doc_number: str | None`
+- `issuing_agency: str | None`
+- `received_at: datetime`
+- `status: enum(received, extracted, analyzed, routed, under_review, in_consultation, approved, closed, out_of_scope, ingest_failed, analysis_failed)`
+- `security_level: enum(unclassified, confidential, secret, top_secret)`
+- `urgency: enum(normal, urgent, critical)`
+- `assigned_department_id: str | None → department.id`
+- `assigned_reviewer_role: str | None`
+- `current_prompt_version: str | None`
+- `notes: text | None`
+
+**document_file**
+- `id, document_id → document.id`
+- `storage_key: str` (path under `LOCAL_FILE_STORAGE_ROOT`)
+- `original_filename: str`
+- `mime_type: str`
+- `size_bytes: int`
+- `sha256: str`
+- `is_primary: bool`
+
+**extracted_artifact**
+- `id, document_id → document.id`
+- `extraction_method: enum(pypdf, render_ocr, qwen-ocr, docx, plaintext)`
+- `text: text`
+- `page_count: int`
+- `warnings: json (list[str])`
+- `extracted_at: datetime`
+
+**ai_analysis**
+- `id, document_id → document.id`
+- `stage: enum(classify, summarize, route, escalate)`
+- `model_name: str`
+- `prompt_version: str` (see §17.10)
+- `source: enum(live, cached)`
+- `payload_json: json` (validated pydantic dump)
+- `confidence: float | None`
+- `created_at: datetime`
+
+**routing_decision**
+- `id, document_id`
+- `suggested_department_id: str | None`
+- `final_department_id: str | None`
+- `decided_by_role: str | None`
+- `decision: enum(accepted, rerouted, escalated, out_of_scope)`
+- `rationale: text | None`
+
+**consultation_note**
+- `id, document_id`
+- `author_role: str`
+- `target_role: str | None`
+- `body: text`
+- `resolved_at: datetime | None`
+
+**audit_event**
+- `id, document_id | None`
+- `actor_role: str | None`
+- `event_type: str` (e.g. `document.created`, `workflow.transition`, `ai.call`, `ai.rejected`)
+- `from_state: str | None`
+- `to_state: str | None`
+- `metadata_json: json`
+- `occurred_at: datetime`
+
+**role** (seeded, read-only at runtime)
+- `id: str` (e.g. `intake_clerk`, `reviewer`, `supervisor`)
+- `label: str`
+- `allowed_actions: json (list[str])`
+
+**department** (seeded)
+- `id: str`
+- `name: str`
+- `description: str | None`
+
+**prompt_version** (registry)
+- `id: str` (short SHA-256 hash, see §17.10)
+- `stage: enum(classify, summarize, route, escalate)`
+- `file_path: str`
+- `label: str | None`
+- `registered_at: datetime`
+
+**demo_scenario** (seeded)
+- `id: str`
+- `name: str`
+- `description: str`
+- `document_id: str → document.id`
+- `category: enum(hero, ambiguity, scan, out_of_scope)`
 
 ---
 
@@ -456,6 +608,44 @@ Implement the human-in-the-loop workflow beyond AI analysis.
 - supervisor role sees different summary/dashboard state than clerk
 - unauthorized role actions fail explicitly
 - timeline view reflects real recorded workflow states
+
+### API endpoint inventory (minimum)
+
+All protected endpoints require `X-GovDoc-Role`. Responses are JSON; errors are `{ "error": { "code": str, "message": str, "details": {...} } }`.
+
+**Health / meta**
+- `GET /healthz` — liveness, no role required
+- `GET /readyz` — readiness (db reachable, config loaded), no role required
+- `GET /meta/roles` — list seeded roles
+- `GET /meta/departments` — list seeded departments
+- `GET /meta/prompt-versions` — list registered prompt versions
+
+**Documents**
+- `POST /documents` — multipart upload; runs extraction + analysis synchronously; returns `{document, extracted_artifact, ai_analysis[]}`
+- `GET /documents` — list with filters (`status`, `department`, `q`, `scenario`)
+- `GET /documents/{id}` — full record (document + files + artifact + analysis + routing + consultation + audit)
+- `GET /documents/{id}/file` — raw file stream
+- `POST /documents/{id}/analyze` — force re-run analysis (supervisor only)
+
+**Workflow actions**
+- `POST /documents/{id}/approve-routing` — reviewer/supervisor
+- `POST /documents/{id}/reroute` — body `{department_id, rationale}`
+- `POST /documents/{id}/request-consultation` — body `{target_role, body}`
+- `POST /documents/{id}/resolve-consultation/{note_id}`
+- `POST /documents/{id}/escalate` — supervisor only
+- `POST /documents/{id}/mark-out-of-scope`
+- `POST /documents/{id}/close`
+
+**Evidence / retrieval**
+- `GET /documents/{id}/evidence` — ranked reference chunks (Pass 7)
+- `POST /retrieval/search` — body `{query, top_k}` (Pass 7, debug-friendly)
+
+**Demo**
+- `GET /demo/scenarios` — list seeded scenarios
+- `POST /demo/reset` — reset demo data (dev/demo env only; fails in prod)
+
+**Error codes (minimum set)**
+`MISSING_ROLE_HEADER`, `UNKNOWN_ROLE`, `FORBIDDEN_ACTION`, `INVALID_TRANSITION`, `UNSUPPORTED_MIME`, `CORRUPT_FILE`, `EXTRACTION_FAILED`, `OCR_FAILED`, `AI_AUTH_FAILED`, `AI_MODEL_UNAVAILABLE`, `AI_SCHEMA_INVALID`, `AI_RATE_LIMITED`, `PERSISTENCE_FAILED`, `NOT_FOUND`.
 
 ---
 
@@ -903,9 +1093,17 @@ class RerankResult(BaseModel):
 class OCRResult(BaseModel):
     text: str
     page_count: int = 1
-    extraction_method: str = "qwen-ocr"
+    extraction_method: str = "qwen-ocr"  # see note below
     warnings: list[str] = []
 ```
+
+**`extraction_method` values — disambiguation**
+- `"qwen-ocr"`: direct VL (`qwen-vl-plus`) call on a single image input (used by `ocr_adapter.ocr(image_bytes)`).
+- `"render_ocr"`: `pdf2image` renders each PDF page to PNG, then each page is passed through the VL call; the `extracted_artifact` row carries `"render_ocr"`, not `"qwen-ocr"`, so the pipeline origin is preserved.
+- `"pypdf"`: direct text extraction from a born-digital PDF, no AI call.
+- `"docx"`, `"plaintext"`: deterministic text extraction from DOCX / TXT sources.
+
+The `OCRResult` model is used by the adapter layer; the persistence layer maps it to `extracted_artifact.extraction_method` and may override the tag to `"render_ocr"` when called inside the PDF render pipeline.
 
 ---
 
@@ -990,7 +1188,19 @@ models:
 | `ocr` | `ocr(base64_of_1x1_white_png)` |
 | `rerank` | `rerank("test query", ["test document"], top_n=1)` |
 
-Return dict `{label: True | "FAILED: <msg>"}`. Exit non-zero if any entry is not `True`.
+**Return contract (locked).** The checker returns a dict with exactly these keys:
+
+```
+{
+  "qwen-plus (classify)":      True | "FAILED: <msg>",
+  "qwen-max (escalate)":       True | "FAILED: <msg>",
+  "text-embedding-v4 (embed)": True | "FAILED: <msg>",
+  "qwen-vl-plus (ocr)":        True | "FAILED: <msg>",
+  "qwen3-rerank (rerank)":     True | "FAILED: <msg>",
+}
+```
+
+Key format is `"{model_name} ({role_key})"`. Test plan §18.3 asserts these exact keys. `make check-credentials` exits non-zero if any value is not `True`.
 
 ---
 
@@ -1015,8 +1225,57 @@ All AI adapter tests must use markers consistent with the reference pattern:
 |---|---|---|
 | `@pytest.mark.unit` | No API, runs in `make ci` | Always runs |
 | `@pytest.mark.contract` | No API, schema checks, runs in `make ci` | Always runs |
-| `@pytest.mark.live` | Real API call | `--live` CLI flag |
+| `@pytest.mark.mock_integration` | App-level integration, adapter stubbed, runs in `make ci` | Always runs |
+| `@pytest.mark.live` | Real API call (per-adapter) | `--live` CLI flag |
 | `@pytest.mark.creds` | Credential check | `--creds` CLI flag |
-| `@pytest.mark.integration` | Full pipeline with real API | `--integration` CLI flag |
+| `@pytest.mark.live_integration` | Full pipeline with real API | `--integration` CLI flag |
 
-`conftest.py` must gate live/creds/integration tests behind CLI flags so `make test` (no flags) never calls external APIs.
+`conftest.py` (at `api/tests/conftest.py`) must gate `live`, `creds`, and `live_integration` tests behind CLI flags so `make test` (no flags) never calls external APIs. `mock_integration` tests use dependency-injected adapter stubs and always run in CI.
+
+---
+
+### 17.10 Prompt versioning scheme
+
+- Prompt files live in `api/prompts/*.txt` and are loaded at process startup.
+- The canonical `prompt_version` is the first **12 hex chars** of the SHA-256 of the raw file bytes (no whitespace trimming).
+- On startup, `PromptRegistry` scans the prompt directory, computes each hash, and upserts a row into the `prompt_version` table for each (stage, hash) pair.
+- Every `ai_analysis` row stores the active `prompt_version` used for that call.
+- Optional human-readable labels live in `config/prompt_versions.yaml` (hash → label). Labels are informational only; the hash is the source of truth.
+- Changing a prompt file produces a new version id; old analyses remain queryable by their original version.
+
+---
+
+### 17.11 Cached AI results storage (demo mode)
+
+- Enabled only when `ENABLE_CACHED_AI_RESULTS=true` AND `ENABLE_DEMO_MODE=true`.
+- Storage root: `CACHED_AI_STORAGE_ROOT` (default `data/cached_ai`).
+- Path layout: `{root}/{prompt_version}/{stage}/{document_id}.json`.
+- File schema:
+  ```json
+  {
+    "prompt_version": "abc123def456",
+    "stage": "classify",
+    "model": "qwen-plus",
+    "document_id": "...",
+    "cached_at": "2026-04-01T10:00:00Z",
+    "result": { "...validated pydantic dump..." }
+  }
+  ```
+- Lookup rule: cache hit only when BOTH `prompt_version` AND `document_id` match; otherwise fall through to live call.
+- The API response must include `"source": "cached" | "live"` on every AI result so UIs can label it.
+- Cache writes happen via an explicit script (`scripts/seed_cached_ai.py`), never implicitly on a live call — this prevents accidental cache poisoning from noisy live runs.
+
+---
+
+### 17.12 Fence-stripping helper
+
+The reference snippet in §17.3 is illustrative, not production-grade. The adapter must ship a tested helper `strip_json_fences(s: str) -> str` with the following contract:
+
+- Input `{"a": 1}` → `{"a": 1}` (unchanged).
+- Input ` ```json\n{"a":1}\n``` ` → `{"a":1}`.
+- Input ` ```\n{"a":1}\n``` ` (no language tag) → `{"a":1}`.
+- Input with surrounding whitespace is `.strip()`-ed before fence detection.
+- Input `garbage` → returned unchanged (caller handles `json.JSONDecodeError`).
+- Nested triple-backticks inside string literals must not break parsing; the helper only strips the outermost pair.
+
+Contract tests for this helper are required in `api/tests/test_ai_contract.py`.
