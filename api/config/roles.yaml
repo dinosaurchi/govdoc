@@ -16,6 +16,12 @@ roles:
       - documents.request_consultation
       - documents.resolve_consultation
       - documents.mark_out_of_scope
+  consultant:
+    label: "Consultant"
+    allowed_actions:
+      - documents.read
+      - documents.list
+      - documents.resolve_consultation
   supervisor:
     label: "Supervisor"
     allowed_actions:

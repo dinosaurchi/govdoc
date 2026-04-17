@@ -343,12 +343,12 @@ class TestRolesConfig:
         assert _CONFIG_DIR.joinpath("roles.yaml").is_file(), "config/roles.yaml must exist"
 
     @pytest.mark.contract
-    def test_roles_yaml_has_three_roles(self):
+    def test_roles_yaml_has_four_roles(self):
         yaml = pytest.importorskip("yaml")
         with open(_CONFIG_DIR / "roles.yaml") as f:
             data = yaml.safe_load(f)
         roles = data.get("roles", {})
-        assert set(roles.keys()) == {"intake_clerk", "reviewer", "supervisor"}
+        assert set(roles.keys()) == {"intake_clerk", "reviewer", "consultant", "supervisor"}
 
     @pytest.mark.contract
     def test_supervisor_has_demo_reset(self):
