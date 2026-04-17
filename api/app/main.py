@@ -1,7 +1,8 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.api.v1 import api_router
 from app.core.config import settings
@@ -38,7 +39,21 @@ app.add_middleware(
 
 @app.get("/health")
 def health_check():
+    """Liveness: process is up (use /health/ready for DB readiness)."""
     return {"status": "healthy", "service": "api"}
+
+
+@app.get("/health/ready")
+def ready_check():
+    """Readiness: SQLite database is reachable (docker-compose should use this)."""
+    db = SessionLocal()
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"database_unavailable: {exc}") from exc
+    finally:
+        db.close()
+    return {"status": "ready", "service": "api"}
 
 
 app.include_router(api_router, prefix="/api/v1")

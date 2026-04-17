@@ -1,37 +1,68 @@
-.PHONY: install dev build test clean lint ci migrate
+.PHONY: install dev build lint test ci clean migrate up down logs qa check-credentials seed-demo up-remote remote-package test-ai test-e2e
 
-PY := .venv/bin/python
+# Prefer project venv when present (absolute path so `cd api && …` still works)
+PY := $(shell test -x "$(CURDIR)/.venv/bin/python" && echo "$(CURDIR)/.venv/bin/python" || command -v python3)
 
 install:
 	npm install
-	pip install -r api/requirements.txt
+	cd api && $(PY) -m pip install -r requirements.txt
 
 dev:
 	npm run dev
 
 migrate:
 	mkdir -p data api/data
-	cd api && ../$(PY) -m alembic upgrade head
-
-up:
-	mkdir -p data api/data
-	docker compose up -d --build
-
-down:
-	docker compose down
+	cd api && $(PY) -m alembic upgrade head
 
 build:
 	npm run build
-
-lint:
-	npm run lint --prefix web
-	$(PY) -m compileall -q api/app
+	docker compose build
 
 test:
 	mkdir -p data api/data
-	cd api && ../$(PY) -m alembic upgrade head && PYTHONPATH=. ../$(PY) -m pytest tests -q
+	cd api && $(PY) -m alembic upgrade head && PYTHONPATH=. $(PY) -m pytest tests -q
+
+lint:
+	npm run lint --prefix web
+	cd api && $(PY) -m ruff check app/adapters tests
+	$(PY) -m compileall -q api/app
 
 ci: lint build test
 
 clean:
 	rm -rf web/.next api/__pycache__
+
+up:
+	mkdir -p data api/data
+	docker compose up -d --build
+	bash scripts/wait_for_compose_healthy.sh
+
+down:
+	docker compose down
+
+logs:
+	docker compose logs -f
+
+qa:
+	bash scripts/qa_local.sh
+
+check-credentials:
+	$(PY) scripts/check_credentials.py
+
+seed-demo:
+	mkdir -p data api/data
+	cd api && $(PY) -m alembic upgrade head && cd .. && $(PY) scripts/seed_demo_data.py
+
+remote-package:
+	bash scripts/remote_package.sh
+
+up-remote:
+	bash scripts/remote_up.sh
+
+test-ai:
+	@echo "test-ai: not implemented — live Model Studio calls are out of scope for Pass 3 baseline" >&2
+	@exit 1
+
+test-e2e:
+	@echo "test-e2e: Playwright suite not added yet; see e2e/README.md" >&2
+	@exit 1

@@ -11,7 +11,7 @@ class MockExtractionProvider(ExtractionProviderInterface):
         return (
             "[Mock extraction] Normalized text preview for uploaded file. "
             f"Source path: {file_path}. "
-            "Real OCR or parser output will replace this in Pass 3+."
+            "Real OCR or parser output will replace this in a later implementation pass."
         )
 
     async def extract_structured_data(self, file_path: str) -> Dict[str, Any]:

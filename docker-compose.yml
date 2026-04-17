@@ -12,6 +12,16 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 25s
 
   api:
     build:
@@ -28,7 +38,7 @@ services:
       - -c
       - mkdir -p /app/data && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health/ready"]
       interval: 5s
       timeout: 5s
       retries: 12

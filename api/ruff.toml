@@ -1,0 +1,8 @@
+target-version = "py312"
+line-length = 120
+src = ["app", "tests"]
+
+[lint]
+# Pass 3: keep lint fail-fast without forcing a bulk import-formatting refactor of Pass 1–2 code.
+select = ["E", "F"]
+ignore = ["E501"]
