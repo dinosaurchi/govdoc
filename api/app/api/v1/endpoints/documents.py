@@ -5,13 +5,11 @@ from typing import List, Optional
 
 from app.api import deps
 from app.api.deps import CurrentRole
-from app.models.document import Document, DocumentStatus
+from app.models.document import Document, ExtractedArtifact
 from app.repositories.document import DocumentRepository
-from app.schemas.document import DocumentOut, DocumentListOut, DocumentDetailOut, UploadResponse
+from app.schemas.document import DocumentListOut, DocumentDetailOut, UploadResponse
 from app.services.ai.interface import AIProvider
 from app.services.ai.mock_provider import MockAIProvider
-from app.services.audit_service import write_audit_event
-from app.services.extraction.interface import ExtractionProviderInterface
 from app.services.intake_service import IntakeService
 from app.services.file_validation import FileValidationError
 from app.services.storage import LocalFileStorage
@@ -171,3 +169,38 @@ async def re_analyze_document(
             status_code=400,
             detail={"error": {"code": "EXTRACTION_FAILED", "message": str(e), "details": {}}},
         )
+
+
+@router.get("/{document_id}/evidence")
+async def get_document_evidence(
+    document_id: str,
+    role: CurrentRole = Depends(deps.get_current_role),
+    db: Session = Depends(deps.get_db),
+):
+    """Get evidence/references for an analyzed document."""
+    document = db.query(Document).filter(Document.id == document_id).first()
+    if not document:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "Document not found", "details": {}}},
+        )
+
+    # Get text from latest artifact
+    artifact = (
+        db.query(ExtractedArtifact)
+        .filter(ExtractedArtifact.document_id == document_id)
+        .order_by(ExtractedArtifact.extracted_at.desc())
+        .first()
+    )
+
+    if not artifact:
+        return {"results": []}
+
+    from app.main import app
+
+    retrieval_svc = getattr(app.state, "retrieval_service", None)
+    if not retrieval_svc:
+        return {"results": []}
+
+    results = retrieval_svc.search(artifact.text[:2000], top_k=5)
+    return {"document_id": document_id, "results": results}

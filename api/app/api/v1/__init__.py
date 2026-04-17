@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import documents, review, consultation, dashboard, demo, meta
+from app.api.v1.endpoints import documents, review, consultation, dashboard, demo, meta, retrieval
 
 api_router = APIRouter()
 
@@ -20,3 +20,6 @@ api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboar
 
 # Demo endpoints
 api_router.include_router(demo.router)
+
+# Retrieval endpoints
+api_router.include_router(retrieval.router)

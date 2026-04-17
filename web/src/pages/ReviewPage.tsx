@@ -3,17 +3,29 @@ import { Card } from '@/components/ui-card';
 import { Badge } from '@/components/ui-badge';
 import { Search, Filter, ExternalLink, Loader2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { fetchApi } from '@/lib/api';
+import { apiGet } from '@/lib/api';
+import { useRole } from '@/hooks/use-role';
+
+type DocListItem = {
+  id: string;
+  title: string;
+  doc_number: string | null;
+  status: string;
+  security_level: string;
+  urgency: string;
+  created_at: string;
+};
 
 export default function ReviewPage() {
-  const [documents, setDocuments] = useState<any[]>([]);
+  const { role } = useRole();
+  const [documents, setDocuments] = useState<DocListItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
     (async () => {
       try {
-        const data = await fetchApi('/documents');
+        const data = await apiGet<DocListItem[]>('/documents/', role);
         if (active) setDocuments(data);
       } catch (err) {
         console.error(err);
@@ -21,17 +33,15 @@ export default function ReviewPage() {
         if (active) setLoading(false);
       }
     })();
-    return () => {
-      active = false;
-    };
-  }, []);
+    return () => { active = false; };
+  }, [role]);
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Review Queue</h1>
-          <p className="text-slate-500">Manage and route incoming administrative tasks.</p>
+          <p className="text-slate-500">Manage and route incoming administrative documents.</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative">
@@ -58,30 +68,40 @@ export default function ReviewPage() {
           ) : documents.length === 0 ? (
             <div className="p-12 text-center text-slate-400">
               <p className="font-medium">No documents in queue.</p>
-              <p className="text-xs">Incoming docs will appear here after intake registration.</p>
+              <p className="text-xs">Upload documents via Intake page to populate the review queue.</p>
             </div>
           ) : (
             <table className="w-full text-left text-sm">
               <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold">
                 <tr>
-                  <th className="px-6 py-4">ID</th>
                   <th className="px-6 py-4">Title</th>
-                  <th className="px-6 py-4">Type</th>
                   <th className="px-6 py-4">Status</th>
+                  <th className="px-6 py-4">Urgency</th>
+                  <th className="px-6 py-4">Security</th>
+                  <th className="px-6 py-4">Created</th>
                   <th className="px-6 py-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {documents.map((doc) => (
                   <tr key={doc.id} className="hover:bg-slate-50/50 transition-colors group">
-                    <td className="px-6 py-4 font-mono text-xs text-slate-500">{doc.id}</td>
                     <td className="px-6 py-4 font-bold text-slate-900">{doc.title}</td>
-                    <td className="px-6 py-4 uppercase text-[10px] font-black tracking-widest text-slate-400">{doc.doc_type}</td>
                     <td className="px-6 py-4">
                       <Badge variant="secondary" className="capitalize">
-                        {String(doc.state).replace(/_/g, ' ')}
+                        {doc.status.replace(/_/g, ' ')}
                       </Badge>
                     </td>
+                    <td className="px-6 py-4">
+                      <Badge className={`capitalize text-[10px] ${
+                        doc.urgency === 'critical' ? 'bg-red-600' :
+                        doc.urgency === 'urgent' ? 'bg-orange-500' :
+                        'bg-slate-400'
+                      }`}>
+                        {doc.urgency}
+                      </Badge>
+                    </td>
+                    <td className="px-6 py-4 text-xs text-slate-500 capitalize">{doc.security_level.replace(/_/g, ' ')}</td>
+                    <td className="px-6 py-4 text-xs text-slate-400">{new Date(doc.created_at).toLocaleDateString()}</td>
                     <td className="px-6 py-4 text-right">
                       <Link to={`/documents/${doc.id}`} className="inline-flex items-center gap-1 font-bold text-blue-600 hover:text-blue-800">
                         View <ExternalLink size={12} />

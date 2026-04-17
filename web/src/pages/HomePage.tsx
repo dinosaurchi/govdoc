@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui-badge';
 import { ArrowRight, CheckCircle2, Clock, AlertCircle, FileUp, ListChecks, MessageSquare, LayoutDashboard, Database, Loader2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useState } from 'react';
-import { fetchApi } from '@/lib/api';
+import { apiPost } from '@/lib/api';
 
 export default function HomePage() {
   const { role } = useRole();
@@ -14,8 +14,8 @@ export default function HomePage() {
   const handleSeed = async () => {
     setSeeding(true);
     try {
-      const res = await fetchApi('/demo/seed', { method: 'POST' });
-      setSeedResult(`Seeded ${res.seeded_documents_count} documents.`);
+      const res = await apiPost<{message: string}>('/demo/reset');
+      setSeedResult(res.message || 'Demo data reset successfully.');
       setTimeout(() => setSeedResult(null), 5000);
     } catch (err: unknown) {
       setSeedResult(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);

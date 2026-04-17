@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui-card';
 import { BarChart3, PieChart, TrendingUp, Users, FileCheck, Layers } from 'lucide-react';
-import { fetchApi } from '@/lib/api';
+import { apiGet } from '@/lib/api';
 
 export default function DashboardPage() {
   const [metrics, setMetrics] = useState<any>(null);
 
   useEffect(() => {
-    fetchApi('/dashboard/stats').then(setMetrics).catch(console.error);
+    apiGet('/dashboard/stats').then(setMetrics).catch(console.error);
   }, []);
 
   const stats = [

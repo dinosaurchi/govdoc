@@ -20,6 +20,8 @@ from app.db.session import SessionLocal
 from app.services.demo import seed_all
 from app.services.file_validation import FileValidationError
 from app.services.prompt_registry import PromptRegistry
+from app.services.retrieval.retrieval_service import RetrievalService
+from app.services.ai.mock_provider import MockAIProvider
 from app.services.workflow import InvalidTransitionError
 
 # Resolve paths relative to the project root regardless of CWD
@@ -42,6 +44,15 @@ async def lifespan(_app: FastAPI):
         _app.state.prompt_registry = registry
     finally:
         db.close()
+
+    # Initialize retrieval service with mock embeddings
+    mock_ai = MockAIProvider()
+    retrieval_svc = RetrievalService(
+        embed_fn=mock_ai.embed,
+        rerank_fn=None,
+    )
+    _app.state.retrieval_service = retrieval_svc
+
     yield
     # Shutdown (nothing to do)
 
