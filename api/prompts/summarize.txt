@@ -1,0 +1,12 @@
+Summarize the following Vietnamese administrative document. Return ONLY a JSON object with these fields:
+
+{
+  "summary_points": ["<key point 1>", "<key point 2>", "<key point 3>", ...],
+  "key_subject": "<main subject in English>",
+  "key_entities": ["<entity 1>", "<entity 2>", ...]
+}
+
+Document text:
+---
+{text}
+---

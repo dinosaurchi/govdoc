@@ -1,0 +1,15 @@
+Classify the following Vietnamese administrative document. Return ONLY a JSON object with these fields:
+
+{
+  "doc_type": "<one of: cong_van, quyet_dinh, thong_bao, to_trinh, bao_cao, other>",
+  "confidence": <float between 0.0 and 1.0>,
+  "rationale": "<brief explanation in English>",
+  "issuing_agency": "<guessed issuing agency or null>",
+  "urgency": "<one of: normal, urgent, critical>",
+  "confidentiality": "<one of: unclassified, confidential, secret, top_secret>"
+}
+
+Document text:
+---
+{text}
+---

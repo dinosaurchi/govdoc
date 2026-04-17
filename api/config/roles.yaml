@@ -1,0 +1,33 @@
+roles:
+  intake_clerk:
+    label: "Intake Clerk"
+    allowed_actions:
+      - documents.create
+      - documents.read
+      - documents.list
+  reviewer:
+    label: "Reviewer"
+    allowed_actions:
+      - documents.create
+      - documents.read
+      - documents.list
+      - documents.approve_routing
+      - documents.reroute
+      - documents.request_consultation
+      - documents.resolve_consultation
+      - documents.mark_out_of_scope
+  supervisor:
+    label: "Supervisor"
+    allowed_actions:
+      - documents.create
+      - documents.read
+      - documents.list
+      - documents.analyze
+      - documents.approve_routing
+      - documents.reroute
+      - documents.request_consultation
+      - documents.resolve_consultation
+      - documents.escalate
+      - documents.mark_out_of_scope
+      - documents.close
+      - demo.reset

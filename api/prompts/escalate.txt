@@ -1,0 +1,16 @@
+This document has been flagged as ambiguous for routing. Multiple departments could be responsible. Analyze the ambiguity and provide a detailed recommendation. Return ONLY a JSON object with these fields:
+
+{
+  "primary_recommendation": "<department id>",
+  "alternatives": ["<alt dept id 1>", "<alt dept id 2>"],
+  "ambiguity_explanation": "<detailed explanation of why this is ambiguous>",
+  "confidence_per_department": {"<dept_id>": <float>, ...},
+  "final_confidence": <float>,
+  "needs_consultation": <true or false>,
+  "consultation_reason": "<reason or null>"
+}
+
+Document text:
+---
+{text}
+---

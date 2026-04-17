@@ -1,0 +1,18 @@
+Analyze the following Vietnamese administrative document and suggest the most appropriate department for handling it. Return ONLY a JSON object with these fields:
+
+{
+  "suggested_department": "<department id from the list below>",
+  "secondary_department": "<optional second department id or null>",
+  "routing_confidence": <float between 0.0 and 1.0>,
+  "routing_rationale": "<brief explanation>",
+  "needs_consultation": <true or false>,
+  "needs_supervisor_review": <true or false>
+}
+
+Available departments:
+{departments}
+
+Document text:
+---
+{text}
+---

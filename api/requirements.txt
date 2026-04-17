@@ -8,3 +8,8 @@ alembic
 pytest
 httpx
 ruff
+openai
+pypdf
+python-docx
+Pillow
+pyyaml
