@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -42,6 +42,7 @@ def get_documents(
 
 @router.post("/", response_model=UploadResponse)
 async def create_document(
+    request: Request,
     file: UploadFile = File(...),
     db: Session = Depends(deps.get_db),
     role: CurrentRole = Depends(deps.get_current_role),
@@ -53,10 +54,14 @@ async def create_document(
 
     # Determine AI provider (real if credentials available, mock otherwise)
     ai_provider = _get_ai_provider()
+    prompt_registry = getattr(request.app.state, "prompt_registry", None)
 
     svc = IntakeService(db)
     try:
-        result = svc.intake(filename, content, mime_type, role.id, ai_provider=ai_provider)
+        result = svc.intake(
+            filename, content, mime_type, role.id,
+            ai_provider=ai_provider, prompt_registry=prompt_registry,
+        )
     except FileValidationError:
         raise  # handled by global exception handler in main.py
     except Exception as e:
@@ -90,6 +95,9 @@ async def create_document(
 
 @router.get("/{doc_id}", response_model=DocumentDetailOut)
 def get_document(doc_id: str, db: Session = Depends(deps.get_db), role: CurrentRole = Depends(deps.get_current_role)):
+    from app.models.document import DocumentStatus
+    from app.services.audit_service import write_audit_event
+
     repo = DocumentRepository(db)
     doc = repo.get_with_relations(doc_id)
     if not doc:
@@ -97,6 +105,24 @@ def get_document(doc_id: str, db: Session = Depends(deps.get_db), role: CurrentR
             status_code=404,
             detail={"error": {"code": "NOT_FOUND", "message": "Document not found", "details": {}}},
         )
+
+    # Implicit transition: reviewer/supervisor reading a `routed` doc claims it → under_review
+    # (per implementation plan §3.4: "reviewer opens record (implicit on read by reviewer role)")
+    if doc.status == DocumentStatus.routed and role.has_action("documents.approve_routing"):
+        doc.status = DocumentStatus.under_review
+        if not doc.assigned_reviewer_role:
+            doc.assigned_reviewer_role = role.id
+        write_audit_event(
+            db,
+            document_id=doc.id,
+            actor_role=role.id,
+            event_type="workflow.transition",
+            from_state="routed",
+            to_state="under_review",
+        )
+        db.commit()
+        db.refresh(doc)
+
     return doc
 
 
@@ -138,6 +164,7 @@ def get_document_file(
 @router.post("/{doc_id}/analyze")
 async def re_analyze_document(
     doc_id: str,
+    request: Request,
     force: bool = Query(False),
     db: Session = Depends(deps.get_db),
     role: CurrentRole = Depends(deps.require_action("documents.analyze")),
@@ -154,7 +181,8 @@ async def re_analyze_document(
         )
 
     ai_provider = _get_ai_provider()
-    analysis_svc = AnalysisService(db, ai_provider)
+    prompt_registry = getattr(request.app.state, "prompt_registry", None)
+    analysis_svc = AnalysisService(db, ai_provider, prompt_registry=prompt_registry)
 
     try:
         analyses = analysis_svc.re_analyze(document, role.id, force=force)

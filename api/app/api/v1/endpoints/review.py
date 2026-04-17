@@ -7,13 +7,21 @@ from app.models.document import Document, DocumentStatus, RoutingDecision, Consu
 from app.models.system import Department
 from app.services.workflow import validate_transition, InvalidTransitionError
 from app.services.audit_service import write_audit_event
-from app.schemas.document import RoutingDecisionOut, ConsultationNoteOut, ConsultationRequest, RerouteRequest
+from app.schemas.document import (
+    ConsultationActionResponse,
+    ConsultationNoteOut,
+    ConsultationRequest,
+    RerouteRequest,
+    RoutingActionResponse,
+    RoutingDecisionOut,
+    WorkflowActionResponse,
+)
 import uuid
 
 router = APIRouter(prefix="/documents", tags=["workflow"])
 
 
-@router.post("/{document_id}/approve-routing")
+@router.post("/{document_id}/approve-routing", response_model=WorkflowActionResponse)
 async def approve_routing(
     document_id: str,
     role: CurrentRole = Depends(require_action("documents.approve_routing")),
@@ -50,7 +58,7 @@ async def approve_routing(
     return {"document": document, "message": "Routing approved"}
 
 
-@router.post("/{document_id}/reroute")
+@router.post("/{document_id}/reroute", response_model=RoutingActionResponse)
 async def reroute_document(
     document_id: str,
     body: RerouteRequest,
@@ -99,7 +107,7 @@ async def reroute_document(
     return {"document": document, "routing_decision": routing}
 
 
-@router.post("/{document_id}/request-consultation")
+@router.post("/{document_id}/request-consultation", response_model=ConsultationActionResponse)
 async def request_consultation(
     document_id: str,
     body: ConsultationRequest,
@@ -144,7 +152,7 @@ async def request_consultation(
     return {"document": document, "consultation_note": note}
 
 
-@router.post("/{document_id}/resolve-consultation/{note_id}")
+@router.post("/{document_id}/resolve-consultation/{note_id}", response_model=ConsultationActionResponse)
 async def resolve_consultation(
     document_id: str,
     note_id: str,
@@ -189,7 +197,7 @@ async def resolve_consultation(
     return {"document": document, "consultation_note": note}
 
 
-@router.post("/{document_id}/escalate")
+@router.post("/{document_id}/escalate", response_model=WorkflowActionResponse)
 async def escalate_document(
     document_id: str,
     role: CurrentRole = Depends(require_action("documents.escalate")),
@@ -213,7 +221,7 @@ async def escalate_document(
     return {"document": document, "message": "Document escalated for supervisor review"}
 
 
-@router.post("/{document_id}/mark-out-of-scope")
+@router.post("/{document_id}/mark-out-of-scope", response_model=WorkflowActionResponse)
 async def mark_out_of_scope(
     document_id: str,
     role: CurrentRole = Depends(require_action("documents.mark_out_of_scope")),
@@ -241,7 +249,7 @@ async def mark_out_of_scope(
     return {"document": document, "message": "Document marked as out of scope"}
 
 
-@router.post("/{document_id}/close")
+@router.post("/{document_id}/close", response_model=WorkflowActionResponse)
 async def close_document(
     document_id: str,
     role: CurrentRole = Depends(require_action("documents.close")),

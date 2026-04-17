@@ -31,10 +31,12 @@ VALID_TRANSITIONS: dict[DocumentStatus, set[DocumentStatus]] = {
     DocumentStatus.under_review: {
         DocumentStatus.in_consultation,
         DocumentStatus.routed,  # can go back to routed if rerouted
+        DocumentStatus.approved,  # reviewer/supervisor approves → close pathway
         DocumentStatus.out_of_scope,
     },
     DocumentStatus.in_consultation: {
         DocumentStatus.under_review,  # consultation resolved
+        DocumentStatus.approved,  # supervisor may close directly from consultation
         DocumentStatus.out_of_scope,
     },
     DocumentStatus.approved: {DocumentStatus.closed},

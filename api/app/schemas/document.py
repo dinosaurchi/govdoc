@@ -212,3 +212,20 @@ class RerouteRequest(BaseModel):
 class ConsultationRequest(BaseModel):
     target_role: str
     body: str
+
+
+class WorkflowActionResponse(BaseModel):
+    """Generic response for workflow action endpoints."""
+
+    document: DocumentOut
+    message: str | None = None
+
+
+class RoutingActionResponse(BaseModel):
+    document: DocumentOut
+    routing_decision: RoutingDecisionOut
+
+
+class ConsultationActionResponse(BaseModel):
+    document: DocumentOut
+    consultation_note: ConsultationNoteOut

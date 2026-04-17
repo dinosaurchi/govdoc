@@ -22,6 +22,7 @@ class IntakeService:
         mime_type: str | None,
         role_id: str,
         ai_provider=None,
+        prompt_registry=None,
     ) -> dict:
         """Process file upload: validate, store, extract, optionally run AI analysis.
 
@@ -104,7 +105,7 @@ class IntakeService:
         if ai_provider is not None and result.text:
             from app.services.ai.analysis_service import AnalysisService
 
-            analysis_svc = AnalysisService(self.db, ai_provider, prompt_registry=None)
+            analysis_svc = AnalysisService(self.db, ai_provider, prompt_registry=prompt_registry)
             try:
                 ai_analyses = analysis_svc.analyze_document(
                     document,

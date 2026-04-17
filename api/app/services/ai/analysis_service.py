@@ -149,26 +149,37 @@ class AnalysisService:
         if not artifact or not artifact.text:
             raise ValueError("No extracted text available for analysis")
 
-        # Idempotency check (skip if already analyzed at current prompt version)
+        # Idempotency check (per-stage): skip pipeline if every required stage
+        # already has an AIAnalysis at the current prompt version for that stage.
         if not force and self.prompt_registry:
-            current_version = self.prompt_registry.get_prompt_version("classify")
-            if current_version:
+            required_stages = (
+                AnalysisStage.classify,
+                AnalysisStage.summarize,
+                AnalysisStage.route,
+            )
+            hits: list[AIAnalysis] = []
+            all_hit = True
+            for stage in required_stages:
+                current_version = self.prompt_registry.get_prompt_version(stage.value)
+                if not current_version:
+                    all_hit = False
+                    break
                 existing = (
                     self.db.query(AIAnalysis)
                     .filter(
                         AIAnalysis.document_id == document.id,
+                        AIAnalysis.stage == stage,
                         AIAnalysis.prompt_version == current_version,
                     )
-                    .all()
+                    .order_by(AIAnalysis.created_at.desc())
+                    .first()
                 )
-                existing_stages = {a.stage for a in existing}
-                expected_stages = {
-                    AnalysisStage.classify,
-                    AnalysisStage.summarize,
-                    AnalysisStage.route,
-                }
-                if expected_stages.issubset(existing_stages):
-                    return existing
+                if not existing:
+                    all_hit = False
+                    break
+                hits.append(existing)
+            if all_hit:
+                return hits
 
         return self.analyze_document(document, artifact.text, role_id, force=force)
 
