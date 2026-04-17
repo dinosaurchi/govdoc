@@ -19,6 +19,14 @@ import {
 import { Link } from 'react-router-dom';
 import { apiGet, apiPost } from '@/lib/api';
 import { useRole } from '@/hooks/use-role';
+import {
+  getWorkflowActionStates,
+  ACTION_GROUP_LABELS,
+  isTerminalStatus,
+  toRoleId,
+  toButtonVariant,
+  type ButtonVariant,
+} from '@/pages/document-detail/workflow-actions';
 
 type AIAnalysis = {
   id: string;
@@ -208,6 +216,33 @@ function DocumentDetailInner({ id }: { id: string }) {
     analysesByStage[a.stage] = a;
   }
   const hasAnalysis = doc.analyses.length > 0;
+
+  // Workflow action model
+  const roleId = toRoleId(role);
+  const terminal = isTerminalStatus(doc.status);
+  const actionStates = terminal
+    ? { available: [], disabled: [], hidden: [] }
+    : getWorkflowActionStates(doc, roleId);
+
+  const visibleActions = [
+    ...actionStates.available.map((a) => ({ action: a, available: true, reason: null as string | null })),
+    ...actionStates.disabled.map((d) => ({ action: d.action, available: false, reason: d.reason })),
+  ];
+  const actionGroupKeys = ['analysis', 'review', 'consultation', 'closeout'] as const;
+
+  const getActionIcon = (actionId: string) => {
+    switch (actionId) {
+      case 'analyze': return <BrainCircuit size={16} />;
+      case 'approve-routing': return <CheckCircle2 size={16} />;
+      case 'reroute': return <Send size={16} />;
+      case 'request-consultation': return <MessageSquare size={16} />;
+      case 'resolve-consultation': return <CheckCircle2 size={16} />;
+      case 'escalate': return <AlertTriangle size={16} />;
+      case 'mark-out-of-scope': return <Send size={16} />;
+      case 'close': return <CheckCircle2 size={16} />;
+      default: return <CheckCircle2 size={16} />;
+    }
+  };
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-20 animate-in fade-in duration-500">
@@ -445,108 +480,140 @@ function DocumentDetailInner({ id }: { id: string }) {
                 <Shield size={18} className="text-slate-700" /> Workflow actions
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              <ActionButton
-                label="Run AI analysis"
-                icon={<BrainCircuit size={16} />}
-                onClick={() => handleAction('analyze')}
-                disabled={actionLoading || hasAnalysis}
-                active={role === 'Intake Clerk' || role === 'Supervisor'}
-                variant="blue"
-              />
-              <ActionButton
-                label="Approve routing"
-                icon={<CheckCircle2 size={16} />}
-                onClick={() => handleAction('approve-routing')}
-                disabled={actionLoading || doc.status !== 'analyzed'}
-                active={role === 'Department Reviewer' || role === 'Supervisor'}
-                variant="emerald"
-              />
-              {/* Request consultation */}
-              {(role === 'Department Reviewer' || role === 'Supervisor') && (
-                <div className="space-y-2">
-                  {!showConsultInput ? (
-                    <ActionButton
-                      label="Request consultation"
-                      icon={<MessageSquare size={16} />}
-                      onClick={() => setShowConsultInput(true)}
-                      disabled={actionLoading || !['under_review', 'routed'].includes(doc.status)}
-                      active={true}
-                      variant="purple"
-                    />
-                  ) : (
-                    <div className="rounded-xl border border-purple-200 bg-purple-50/50 p-3 space-y-2">
-                      <textarea
-                        value={consultBody}
-                        onChange={(e) => setConsultBody(e.target.value)}
-                        placeholder="Describe what you need consulted on..."
-                        rows={3}
-                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 outline-none resize-none"
-                      />
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          disabled={actionLoading || !consultBody.trim()}
-                          onClick={() => {
-                            handleAction('request-consultation', { target_role: 'consultant', body: consultBody });
-                            setConsultBody('');
-                            setShowConsultInput(false);
-                          }}
-                          className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl font-bold text-sm hover:bg-purple-700 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {actionLoading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
-                          Send
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setShowConsultInput(false); setConsultBody(''); }}
-                          className="px-3 py-2 text-slate-500 hover:text-slate-700 text-sm font-medium rounded-xl hover:bg-slate-100 transition"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  )}
+            <CardContent className="space-y-4">
+              {terminal ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-center space-y-1">
+                  <p className="text-sm font-bold text-slate-600">
+                    Document is <span className="capitalize">{doc.status.replace(/_/g, ' ')}</span>
+                  </p>
+                  <p className="text-xs text-slate-400">No further workflow actions available.</p>
                 </div>
+              ) : (
+                actionGroupKeys.map((groupKey) => {
+                  const groupItems = visibleActions.filter((v) => v.action.group === groupKey);
+                  if (groupItems.length === 0) return null;
+
+                  return (
+                    <div key={groupKey} className="space-y-2">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                        {ACTION_GROUP_LABELS[groupKey]}
+                      </p>
+                      {groupItems.map(({ action, available: isAvailable, reason }) => {
+                        const icon = getActionIcon(action.id);
+                        const btnVariant: ButtonVariant = toButtonVariant(action.variant);
+
+                        // --- Special: request-consultation inline form ---
+                        if (action.id === 'request-consultation') {
+                          if (isAvailable) {
+                            return (
+                              <div key={action.id} className="space-y-2">
+                                {!showConsultInput ? (
+                                  <ActionButton
+                                    label={action.label}
+                                    icon={icon}
+                                    onClick={() => setShowConsultInput(true)}
+                                    disabled={actionLoading}
+                                    active={true}
+                                    variant={btnVariant}
+                                  />
+                                ) : (
+                                  <div className="rounded-xl border border-purple-200 bg-purple-50/50 p-3 space-y-2">
+                                    <textarea
+                                      value={consultBody}
+                                      onChange={(e) => setConsultBody(e.target.value)}
+                                      placeholder="Describe what you need consulted on..."
+                                      rows={3}
+                                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 outline-none resize-none"
+                                    />
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        disabled={actionLoading || !consultBody.trim()}
+                                        onClick={() => {
+                                          handleAction('request-consultation', { target_role: 'consultant', body: consultBody });
+                                          setConsultBody('');
+                                          setShowConsultInput(false);
+                                        }}
+                                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl font-bold text-sm hover:bg-purple-700 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                                      >
+                                        {actionLoading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
+                                        Send
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => { setShowConsultInput(false); setConsultBody(''); }}
+                                        className="px-3 py-2 text-slate-500 hover:text-slate-700 text-sm font-medium rounded-xl hover:bg-slate-100 transition"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }
+                          // Disabled state
+                          return (
+                            <div key={action.id} className="space-y-1">
+                              <ActionButton
+                                label={action.label}
+                                icon={icon}
+                                onClick={() => {}}
+                                disabled={true}
+                                active={true}
+                                variant={btnVariant}
+                              />
+                              {reason && <p className="text-[10px] text-slate-400 px-1">{reason}</p>}
+                            </div>
+                          );
+                        }
+
+                        // --- Special: resolve-consultation (auto-select note) ---
+                        if (action.id === 'resolve-consultation') {
+                          return (
+                            <div key={action.id} className="space-y-1">
+                              <ActionButton
+                                label={action.label}
+                                icon={icon}
+                                onClick={() => {
+                                  const unresolved = doc.consultation_notes.filter((n) => n.resolved_at === null);
+                                  const mostRecent = unresolved[unresolved.length - 1];
+                                  if (mostRecent) {
+                                    handleAction('resolve-consultation', { note_id: mostRecent.id });
+                                  }
+                                }}
+                                disabled={actionLoading || !isAvailable}
+                                active={true}
+                                variant={btnVariant}
+                              />
+                              {!isAvailable && reason && (
+                                <p className="text-[10px] text-slate-400 px-1">{reason}</p>
+                              )}
+                            </div>
+                          );
+                        }
+
+                        // --- Default action rendering ---
+                        return (
+                          <div key={action.id} className="space-y-1">
+                            <ActionButton
+                              label={action.label}
+                              icon={icon}
+                              onClick={() => handleAction(action.id)}
+                              disabled={actionLoading || !isAvailable}
+                              active={true}
+                              variant={btnVariant}
+                            />
+                            {!isAvailable && reason && (
+                              <p className="text-[10px] text-slate-400 px-1">{reason}</p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })
               )}
-              {/* Resolve consultation */}
-              <ActionButton
-                label="Resolve consultation"
-                icon={<CheckCircle2 size={16} />}
-                onClick={() => {
-                  const unresolved = doc.consultation_notes.filter((n) => n.resolved_at === null);
-                  const mostRecent = unresolved[unresolved.length - 1];
-                  if (mostRecent) {
-                    handleAction('resolve-consultation', { note_id: mostRecent.id });
-                  }
-                }}
-                disabled={actionLoading || doc.status !== 'in_consultation' || !doc.consultation_notes.some((n) => n.resolved_at === null)}
-                active={role === 'Department Reviewer' || role === 'Supervisor' || role === 'Consultant'}
-                variant="emerald"
-              />
-              <ActionButton
-                label="Escalate to supervisor"
-                icon={<AlertTriangle size={16} />}
-                onClick={() => handleAction('escalate')}
-                disabled={actionLoading}
-                active={role === 'Department Reviewer' || role === 'Supervisor'}
-                variant="blue"
-              />
-              <ActionButton
-                label="Mark out of scope"
-                icon={<Send size={16} />}
-                onClick={() => handleAction('mark-out-of-scope')}
-                disabled={actionLoading}
-                active={role === 'Department Reviewer' || role === 'Supervisor'}
-              />
-              <ActionButton
-                label="Close document"
-                icon={<CheckCircle2 size={16} />}
-                onClick={() => handleAction('close')}
-                disabled={actionLoading}
-                active={role === 'Supervisor'}
-                variant="emerald"
-              />
             </CardContent>
           </Card>
         </div>
