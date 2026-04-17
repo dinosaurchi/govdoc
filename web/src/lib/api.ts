@@ -51,6 +51,28 @@ export async function apiGet<T>(path: string, role?: string): Promise<T> {
   return res.json();
 }
 
+export type PagedResult<T> = {
+  items: T[];
+  total: number | null;
+};
+
+/** Paged GET helper: reads `X-Total-Count` alongside the JSON body, so pages
+ *  can implement "load more" pagination without making a second count call. */
+export async function apiGetPaged<T>(path: string, role?: string): Promise<PagedResult<T>> {
+  const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders(role) });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(formatErrorPayload(error));
+  }
+  const items = (await res.json()) as T[];
+  const header = res.headers.get('x-total-count');
+  const total = header != null ? Number(header) : null;
+  return {
+    items,
+    total: Number.isFinite(total) ? total : null,
+  };
+}
+
 export async function apiPost<T>(path: string, body?: unknown, role?: string): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method: 'POST',
