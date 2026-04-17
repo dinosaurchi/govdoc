@@ -10,32 +10,40 @@ type AIAnalysis = {
   payload_json: Record<string, unknown>;
 };
 
-type RespDoc = {
+type ResponseListDoc = {
   id: string;
   title: string;
   status: string;
+};
+
+type ResponseDetailDoc = ResponseListDoc & {
   analyses: AIAnalysis[];
 };
 
 export default function ResponsePage() {
   const { role } = useRole();
-  const [documents, setDocuments] = useState<RespDoc[]>([]);
-  const [selectedDoc, setSelectedDoc] = useState<RespDoc | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [documents, setDocuments] = useState<ResponseListDoc[]>([]);
+  const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
+  const [selectedDoc, setSelectedDoc] = useState<ResponseDetailDoc | null>(null);
+  const [loadingList, setLoadingList] = useState(true);
+  const [loadingDetail, setLoadingDetail] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
   const fetchResponses = async () => {
     try {
-      const data = await apiGet<RespDoc[]>('/documents/', role);
+      const data = await apiGet<ResponseListDoc[]>('/documents/', role);
       const respDocs = data.filter((d) =>
         ['approved', 'closed', 'routed', 'under_review'].includes(d.status)
       );
       setDocuments(respDocs);
-      setSelectedDoc((prev) => prev ?? respDocs[0] ?? null);
+      setSelectedDocId((prev) => {
+        if (prev && respDocs.some((doc) => doc.id === prev)) return prev;
+        return respDocs[0]?.id ?? null;
+      });
     } catch (err) {
       console.error(err);
     } finally {
-      setLoading(false);
+      setLoadingList(false);
     }
   };
 
@@ -43,22 +51,48 @@ export default function ResponsePage() {
     let active = true;
     (async () => {
       try {
-        const data = await apiGet<RespDoc[]>('/documents/', role);
+        const data = await apiGet<ResponseListDoc[]>('/documents/', role);
         const respDocs = data.filter((d) =>
           ['approved', 'closed', 'routed', 'under_review'].includes(d.status)
         );
         if (active) {
           setDocuments(respDocs);
-          setSelectedDoc((prev) => prev ?? respDocs[0] ?? null);
+          setSelectedDocId((prev) => {
+            if (prev && respDocs.some((doc) => doc.id === prev)) return prev;
+            return respDocs[0]?.id ?? null;
+          });
         }
       } catch (err) {
         console.error(err);
       } finally {
-        if (active) setLoading(false);
+        if (active) setLoadingList(false);
       }
     })();
     return () => { active = false; };
   }, [role]);
+
+  useEffect(() => {
+    let active = true;
+    if (!selectedDocId) {
+      setSelectedDoc(null);
+      return () => { active = false; };
+    }
+
+    setLoadingDetail(true);
+    (async () => {
+      try {
+        const data = await apiGet<ResponseDetailDoc>(`/documents/${selectedDocId}`, role);
+        if (active) setSelectedDoc(data);
+      } catch (err) {
+        console.error(err);
+        if (active) setSelectedDoc(null);
+      } finally {
+        if (active) setLoadingDetail(false);
+      }
+    })();
+
+    return () => { active = false; };
+  }, [role, selectedDocId]);
 
   const handleApprove = async () => {
     if (!selectedDoc) return;
@@ -73,7 +107,7 @@ export default function ResponsePage() {
     }
   };
 
-  const getSummaryFromAnalyses = (doc: RespDoc): string => {
+  const getSummaryFromAnalyses = (doc: ResponseDetailDoc): string => {
     const summary = doc.analyses.find((a) => a.stage === 'summarize');
     if (summary?.payload_json?.summary_points) {
       return (summary.payload_json.summary_points as string[]).join('. ');
@@ -84,7 +118,7 @@ export default function ResponsePage() {
     return 'Document has been processed and analyzed by the AI pipeline.';
   };
 
-  if (loading) return <div className="h-96 flex items-center justify-center"><Loader2 className="animate-spin text-blue-600" size={48} /></div>;
+  if (loadingList) return <div className="h-96 flex items-center justify-center"><Loader2 className="animate-spin text-blue-600" size={48} /></div>;
 
   return (
     <div className="space-y-6">
@@ -109,13 +143,13 @@ export default function ResponsePage() {
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') setSelectedDoc(doc);
+                  if (e.key === 'Enter' || e.key === ' ') setSelectedDocId(doc.id);
                 }}
-                onClick={() => setSelectedDoc(doc)}
+                onClick={() => setSelectedDocId(doc.id)}
                 className="rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-400"
               >
                 <Card
-                  className={`cursor-pointer transition-all ${selectedDoc?.id === doc.id ? 'border-emerald-500 shadow-md ring-2 ring-emerald-50' : 'hover:border-emerald-200'}`}
+                  className={`cursor-pointer transition-all ${selectedDocId === doc.id ? 'border-emerald-500 shadow-md ring-2 ring-emerald-50' : 'hover:border-emerald-200'}`}
                 >
                   <CardContent className="p-4 space-y-2">
                     <div className="flex items-center justify-between">
@@ -146,38 +180,45 @@ export default function ResponsePage() {
               </div>
             </CardHeader>
             <CardContent className="p-8 space-y-6">
-              <div className="space-y-4 bg-white p-8 rounded-xl border border-slate-200 shadow-inner min-h-[400px] font-serif relative">
-                {selectedDoc.status === 'closed' && (
-                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rotate-[-25deg] opacity-10 pointer-events-none">
-                    <div className="border-8 border-emerald-600 rounded-full p-4 flex flex-col items-center justify-center">
-                      <CheckCircle2 size={80} className="text-emerald-600" />
-                      <span className="text-4xl font-black text-emerald-600 uppercase">CLOSED</span>
+              {loadingDetail ? (
+                <div className="min-h-[400px] flex items-center justify-center">
+                  <Loader2 className="animate-spin text-blue-600" size={32} />
+                </div>
+              ) : (
+                <div className="space-y-4 bg-white p-8 rounded-xl border border-slate-200 shadow-inner min-h-[400px] font-serif relative">
+                  {selectedDoc.status === 'closed' && (
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rotate-[-25deg] opacity-10 pointer-events-none">
+                      <div className="border-8 border-emerald-600 rounded-full p-4 flex flex-col items-center justify-center">
+                        <CheckCircle2 size={80} className="text-emerald-600" />
+                        <span className="text-4xl font-black text-emerald-600 uppercase">CLOSED</span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex justify-between items-start border-b border-slate-200 pb-4 mb-8">
+                    <div className="text-[10px] font-bold space-y-1 text-slate-900">
+                      <p>GOVDOC SECUREFLOW</p>
+                      <p className="border-t border-slate-900 pt-1">DOCUMENT PROCESSING</p>
+                    </div>
+                    <div className="text-right text-[10px] text-slate-900">
+                      <p className="font-bold">OFFICIAL RESPONSE DRAFT</p>
+                      <p className="font-bold border-t border-slate-900 pt-1">Auto-generated</p>
                     </div>
                   </div>
-                )}
-                <div className="flex justify-between items-start border-b border-slate-200 pb-4 mb-8">
-                  <div className="text-[10px] font-bold space-y-1 text-slate-900">
-                    <p>GOVDOC SECUREFLOW</p>
-                    <p className="border-t border-slate-900 pt-1">DOCUMENT PROCESSING</p>
-                  </div>
-                  <div className="text-right text-[10px] text-slate-900">
-                    <p className="font-bold">OFFICIAL RESPONSE DRAFT</p>
-                    <p className="font-bold border-t border-slate-900 pt-1">Auto-generated</p>
-                  </div>
-                </div>
 
-                <div className="text-center space-y-2 py-4">
-                  <h2 className="text-lg font-bold uppercase">Response Document</h2>
-                  <p className="text-xs italic">Re: {selectedDoc.title}</p>
-                </div>
+                  <div className="text-center space-y-2 py-4">
+                    <h2 className="text-lg font-bold uppercase">Response Document</h2>
+                    <p className="text-xs italic">Re: {selectedDoc.title}</p>
+                  </div>
 
-                <div className="text-sm space-y-4 text-slate-800 leading-relaxed">
-                  <p>Regarding document {selectedDoc.id.slice(0, 8)}:</p>
-                  <p>
-                    {getSummaryFromAnalyses(selectedDoc)}
-                  </p>
+                  <div className="text-sm space-y-4 text-slate-800 leading-relaxed">
+                    <p>Regarding document {selectedDoc.id.slice(0, 8)}:</p>
+                    <p>
+                      {getSummaryFromAnalyses(selectedDoc)}
+                    </p>
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div className="flex items-center justify-end gap-3 pt-4">
                 {selectedDoc.status !== 'closed' && role === 'Supervisor' && (
