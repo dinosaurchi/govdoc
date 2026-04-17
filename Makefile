@@ -20,7 +20,7 @@ build:
 
 test:
 	mkdir -p data api/data
-	cd api && $(PY) -m alembic upgrade head && PYTHONPATH=. $(PY) -m pytest tests -q
+	cd api && $(PY) -m alembic upgrade head && PYTHONPATH=. $(PY) -m pytest tests -q -m "unit or contract or mock_integration" --tb=short
 
 lint:
 	npm run lint --prefix web
@@ -51,7 +51,7 @@ qa:
 	API_URL="http://$(_QA_HOST):$(APP_PORT)" WEB_URL="http://$(_QA_HOST):$(WEB_PORT)" bash scripts/qa_local.sh
 
 check-credentials:
-	$(PY) scripts/check_credentials.py
+	cd api && $(PY) -m pytest tests -q -m "creds" --creds --tb=short
 
 seed-demo:
 	mkdir -p data api/data
@@ -64,8 +64,7 @@ up-remote:
 	bash scripts/remote_up.sh
 
 test-ai:
-	@echo "test-ai: not implemented — live Model Studio calls are out of scope for Pass 3 baseline" >&2
-	@exit 1
+	cd api && $(PY) -m pytest tests -q -m "live or live_integration" --live --integration --tb=short
 
 test-e2e:
 	@echo "test-e2e: Playwright suite not added yet; see e2e/README.md" >&2

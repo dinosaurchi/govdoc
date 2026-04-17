@@ -37,15 +37,15 @@ app.add_middleware(
 )
 
 
-@app.get("/health")
+@app.get("/healthz")
 def health_check():
-    """Liveness: process is up (use /health/ready for DB readiness)."""
-    return {"status": "healthy", "service": "api"}
+    """Liveness: process is up (no DB check)."""
+    return {"status": "ok"}
 
 
-@app.get("/health/ready")
+@app.get("/readyz")
 def ready_check():
-    """Readiness: SQLite database is reachable (docker-compose should use this)."""
+    """Readiness: database is reachable (docker-compose should use this)."""
     db = SessionLocal()
     try:
         db.execute(text("SELECT 1"))
@@ -53,7 +53,7 @@ def ready_check():
         raise HTTPException(status_code=503, detail=f"database_unavailable: {exc}") from exc
     finally:
         db.close()
-    return {"status": "ready", "service": "api"}
+    return {"status": "ok"}
 
 
 app.include_router(api_router, prefix="/api/v1")
