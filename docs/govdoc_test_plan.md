@@ -664,3 +664,237 @@ The following behaviors should cause test failure:
 - hiding deployment failure behind successful command exit
 - reporting healthy state when a required dependency is not healthy
 - returning demo cached results without clear labeling
+
+---
+
+## 18) Model Studio integration test specification
+
+This section is concrete and prescriptive, derived from the validated `alibaba-api-test` reference repo. Implement these tests exactly.
+
+---
+
+### 18.1 pytest marker setup (`tests/conftest.py`)
+
+```python
+def pytest_configure(config):
+    config.addinivalue_line("markers", "unit: unit tests (no external API)")
+    config.addinivalue_line("markers", "contract: contract tests (no external API)")
+    config.addinivalue_line("markers", "live: live API tests (requires credentials)")
+    config.addinivalue_line("markers", "creds: credential validation tests")
+    config.addinivalue_line("markers", "integration: integration tests (requires credentials)")
+
+def pytest_addoption(parser):
+    parser.addoption("--live", action="store_true", default=False)
+    parser.addoption("--creds", action="store_true", default=False)
+    parser.addoption("--integration", action="store_true", default=False)
+
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        if "live" in item.keywords and not config.getoption("--live", default=False):
+            item.add_marker(pytest.mark.skip(reason="Need --live flag"))
+        if "creds" in item.keywords and not config.getoption("--creds", default=False):
+            item.add_marker(pytest.mark.skip(reason="Need --creds flag"))
+        if "integration" in item.keywords and not config.getoption("--integration", default=False):
+            item.add_marker(pytest.mark.skip(reason="Need --integration flag"))
+```
+
+`make test` runs with no flags — never calls external API.  
+`make check-credentials` runs pytest with `--creds`.  
+`make test-ai` runs pytest with `--live --integration`.
+
+---
+
+### 18.2 Contract tests (no API — run in `make ci`)
+
+File: `api/tests/test_ai_contract.py` marked `@pytest.mark.contract`
+
+Required tests:
+
+**Schema validation**
+- `ClassificationResult` parses a valid dict
+- `ClassificationResult` rejects missing `doc_type`
+- `SummaryResult` requires non-empty `summary_points`
+- `RoutingResult` requires `suggested_department`
+- `EscalationResult` requires `primary_recommendation` and `alternatives`
+- `OCRResult` defaults `extraction_method="qwen-ocr"` and `warnings=[]`
+- `EmbeddingResult` parses `embedding: list[float]`
+- `RerankResult` parses `index`, `relevance_score`, `text`
+
+**JSON fence stripping**
+- Input ` ```json\n{"key": "value"}\n``` ` → parses correctly
+- Input `{"key": "value"}` (no fences) → parses correctly
+- Input `garbage non-json` → raises `json.JSONDecodeError`
+
+**Config loading**
+- `models.yaml` contains all 7 required keys: `classify`, `summarize`, `route`, `escalate`, `ocr`, `embed`, `rerank`
+- `classify.model == "qwen-plus"`, `escalate.model == "qwen-max"`, `embed.model == "text-embedding-v4"`, `rerank.model == "qwen3-rerank"`
+- Missing `MODELSTUDIO_API_KEY` raises `ValueError` at config load time
+- Missing `MODELSTUDIO_BASE_URL` raises `ValueError`
+- Missing `MODELSTUDIO_DASHSCOPE_URL` raises `ValueError`
+
+**Prompt files**
+- `prompts/classify.txt` contains `{text}` and `doc_type`
+- `prompts/summarize.txt` contains `{text}` and `summary_points`
+- `prompts/route.txt` contains `{text}` and `{departments}`
+- `prompts/escalate.txt` contains `{text}` and `ambiguity`
+- Missing prompt file raises `FileNotFoundError`
+
+---
+
+### 18.3 Credential check tests (requires `--creds`)
+
+File: `api/tests/test_live_creds.py` marked `@pytest.mark.creds`
+
+Required tests — each must pass individually:
+
+```python
+def test_qwen_plus_available(client):
+    results = client.check_credentials()
+    assert results["qwen-plus (classify)"] is True
+
+def test_qwen_max_available(client):
+    results = client.check_credentials()
+    assert results["qwen-max (escalate)"] is True
+
+def test_embedding_available(client):
+    results = client.check_credentials()
+    assert results["text-embedding-v4 (embed)"] is True
+
+def test_ocr_available(client):
+    results = client.check_credentials()
+    assert results["qwen-vl-plus (ocr)"] is True
+
+def test_rerank_available(client):
+    results = client.check_credentials()
+    assert results["qwen3-rerank (rerank)"] is True
+```
+
+If any test fails, `make check-credentials` must exit non-zero.
+
+---
+
+### 18.4 Live API tests (requires `--live`)
+
+File: `api/tests/test_live_api.py` marked `@pytest.mark.live`
+
+**Chat completions**
+- Basic generation returns non-empty `content` and `usage.total_tokens > 0`
+- JSON output: request `{"status": "ok", "number": 42}` → parsed correctly
+- Vietnamese text: send Vietnamese prompt, verify non-empty response
+- Unknown model name raises `ValueError` with message "Unknown model"
+- `qwen-max` responds to same prompt
+
+**Embeddings**
+- Single text → `len(embedding) > 0`, `model` field populated
+- Batch of 3 texts → 3 results
+- Vietnamese text (`"Cong van so 123/UBND-VP"`) → embedding returned
+- Embedding dimension is 1024 (as configured)
+- Similarity ordering: two similar Vietnamese texts score higher than one unrelated text
+
+**OCR**
+- White image with text → non-empty `text` returned
+- `extraction_method == "qwen-ocr"`
+- Empty response for blank image does not raise (must handle gracefully)
+
+**Rerank**
+- Query + 3 candidates → results in descending `relevance_score` order
+- Single candidate → 1 result
+- Vietnamese query + Vietnamese documents → reranked correctly
+- Non-200 response raises `RuntimeError`
+
+---
+
+### 18.5 Integration pipeline tests (requires `--integration`)
+
+File: `api/tests/test_ai_pipeline.py` marked `@pytest.mark.integration`
+
+**Classification pipeline**
+- Extract text from fixture `cong_van` → classify → `doc_type` is one of 6 valid types → `confidence > 0.5`
+- Classify returns `rationale` (non-empty string)
+
+**Summarization pipeline**
+- Summarize fixture text → `len(summary_points) >= 2` → `key_subject` non-empty
+
+**Routing pipeline**
+- Route fixture text with department list → `suggested_department` in valid department IDs → `routing_confidence > 0`
+
+**Escalation pipeline**
+- Escalate ambiguous text → `primary_recommendation` in dept IDs → `final_confidence > 0` → `ambiguity_explanation` non-empty → `len(alternatives) >= 1`
+
+**Retrieval pipeline**
+- Embed 3 candidate texts + query → cosine similarity returns top-k correctly ordered
+- Most similar pair has higher similarity than unrelated pair
+
+**Full pipeline (extract → classify → summarize → route)**
+- Fixture cong_van PDF: extract text → classify → summarize → route
+- All three results non-empty
+- Entire pipeline completes without exception
+
+---
+
+### 18.6 PDF extraction tests (no API)
+
+File: `api/tests/test_extraction.py` marked `@pytest.mark.unit`
+
+- Born-digital PDF → `has_text=True`, `extraction_method="pypdf"`, `page_count >= 1`
+- Scan-only PDF (no embedded text) → `has_text=False` from `pypdf`
+- Missing file → `FileNotFoundError`
+- `extract_text_or_ocr` on born-digital → returns pypdf result (no OCR call)
+- `extract_text_or_ocr` on scan-only → calls OCR adapter (mock it), records `extraction_method="render_ocr"` and warns
+
+---
+
+### 18.7 Error handling tests
+
+File: `api/tests/test_ai_errors.py` marked `@pytest.mark.unit`
+
+All with mocked adapter:
+
+- Adapter raises `openai.AuthenticationError` → normalized as `ModelStudioAuthError`
+- Adapter raises `openai.NotFoundError` (model unavailable) → normalized as `ModelStudioModelUnavailableError`
+- Adapter raises `openai.RateLimitError` → normalized as `ModelStudioRateLimitError`
+- Adapter returns valid JSON but wrong schema → `pydantic.ValidationError` raised, not swallowed
+- Adapter returns non-JSON content → `json.JSONDecodeError` raised, not swallowed
+- Rerank endpoint returns 401 → `RuntimeError` with status code in message
+- Rerank endpoint returns 404 → `RuntimeError` with status code in message
+
+---
+
+### 18.8 Test fixtures required
+
+Minimal fixtures in `api/tests/fixtures/`:
+
+| File | Content |
+|---|---|
+| `sample_cong_van.txt` | Plain-text Vietnamese cong van (born-digital) |
+| `sample_departments.json` | `{"departments": [{"id": "...", "name": "..."}, ...]}` (min 5 depts) |
+| `malformed_ai_response.txt` | Non-JSON string to test parse rejection |
+| `white_10x10.png` | Minimal PNG for OCR credential check |
+
+---
+
+### 18.9 `make test-ai` output format
+
+Must emit to stdout and a file (`data/ai_quality_report.json`):
+
+```json
+{
+  "timestamp": "ISO-8601",
+  "summary": {
+    "classification_accuracy": 0.0,
+    "routing_top1_accuracy": 0.0,
+    "routing_top2_accuracy": 0.0,
+    "summary_schema_valid_rate": 0.0,
+    "ocr_success_rate": 0.0,
+    "ambiguity_flagged_rate": 0.0
+  },
+  "failures": [
+    {"file": "...", "expected": "...", "got": "...", "error": "..."}
+  ]
+}
+```
+
+Hard fail thresholds (exit non-zero):
+- `summary_schema_valid_rate < 1.0`
+- `ocr_success_rate == 0.0`
+- any adapter error accepted as success

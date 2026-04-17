@@ -712,3 +712,311 @@ If a proposed change does not materially improve:
 - demo reliability
 
 then do not do it in this phase.
+
+---
+
+## 17) Model Studio integration reference
+
+This section is concrete and prescriptive. All AI adapter code in `api/` must follow these patterns exactly, derived from the validated `alibaba-api-test` reference repo.
+
+---
+
+### 17.1 Environment variables required
+
+| Variable | Purpose |
+|---|---|
+| `MODELSTUDIO_API_KEY` | Bearer token for both endpoints |
+| `MODELSTUDIO_BASE_URL` | OpenAI-compatible base URL (chat, embeddings, OCR) |
+| `MODELSTUDIO_DASHSCOPE_URL` | DashScope base URL (rerank only) |
+
+All three are required. Startup must fail if any is missing.
+
+URL format example (workspace-specific):
+- OpenAI-compatible: `https://ws-<id>.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1`
+- DashScope: `https://ws-<id>.ap-southeast-1.maas.aliyuncs.com/api/v1`
+
+---
+
+### 17.2 Confirmed model names
+
+| Role | Model name | API type |
+|---|---|---|
+| Classification | `qwen-plus` | OpenAI-compatible |
+| Summarization | `qwen-plus` | OpenAI-compatible |
+| Routing | `qwen-plus` | OpenAI-compatible |
+| Escalation (ambiguous) | `qwen-max` | OpenAI-compatible |
+| OCR | `qwen-vl-plus` | OpenAI-compatible (multimodal) |
+| Embeddings | `text-embedding-v4` | OpenAI-compatible |
+| Rerank | `qwen3-rerank` | DashScope (dedicated endpoint) |
+
+**Important**: `gte-rerank-v2` is NOT available on workspace endpoints. Use `qwen3-rerank`.
+
+Store model names in a `config/models.yaml` file, not hardcoded in source. Load them at runtime from config.
+
+---
+
+### 17.3 Client implementation
+
+Use two clients:
+1. `openai.OpenAI(api_key=..., base_url=MODELSTUDIO_BASE_URL)` — for chat, embeddings, OCR
+2. `httpx.Client(timeout=120.0)` — for rerank via DashScope endpoint
+
+#### Chat completion call pattern
+```python
+response = openai_client.chat.completions.create(
+    model=model_config.model,
+    messages=messages,                  # list[{"role": str, "content": str}]
+    temperature=model_config.temperature,
+    max_tokens=model_config.max_tokens,
+)
+content = response.choices[0].message.content
+usage = response.usage  # .prompt_tokens, .completion_tokens, .total_tokens
+finish_reason = response.choices[0].finish_reason
+```
+
+#### Structured JSON output — strip markdown fences
+Models may return JSON wrapped in ` ```json ... ``` `. Must strip fences before parsing:
+```python
+content = response.strip()
+if content.startswith("```"):
+    lines = content.split("\n")
+    inside = False
+    json_lines = []
+    for line in lines:
+        if line.startswith("```"):
+            inside = not inside
+            continue
+        if inside:
+            json_lines.append(line)
+    content = "\n".join(json_lines)
+parsed = json.loads(content)
+```
+
+#### Embedding call pattern
+```python
+response = openai_client.embeddings.create(
+    model="text-embedding-v4",
+    input=texts,           # list[str]
+    dimensions=1024,
+)
+# response.data[i].embedding  → list[float]
+# response.usage.total_tokens → int
+```
+
+#### OCR call pattern (multimodal chat)
+```python
+response = openai_client.chat.completions.create(
+    model="qwen-vl-plus",
+    messages=[{
+        "role": "user",
+        "content": [
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{image_base64}"},
+            },
+            {
+                "type": "text",
+                "text": "Please extract all text from this image. Return only the extracted text.",
+            },
+        ],
+    }],
+    temperature=0.0,
+    max_tokens=2048,
+)
+text = response.choices[0].message.content or ""
+```
+
+#### Rerank call pattern (DashScope, raw httpx)
+```python
+payload = {
+    "model": "qwen3-rerank",
+    "input": {
+        "query": query,
+        "documents": documents,   # list[str]
+    },
+    "parameters": {
+        "top_n": top_n,
+        "return_documents": True,
+    },
+}
+resp = httpx_client.post(
+    f"{MODELSTUDIO_DASHSCOPE_URL}/services/rerank/text-rerank/text-rerank",
+    headers={
+        "Authorization": f"Bearer {MODELSTUDIO_API_KEY}",
+        "Content-Type": "application/json",
+    },
+    json=payload,
+)
+if resp.status_code != 200:
+    raise RuntimeError(f"Rerank API error: {resp.status_code} {resp.text}")
+results = resp.json()["output"]["results"]
+# Each result: {"index": int, "relevance_score": float, "document": {"text": str}}
+```
+
+---
+
+### 17.4 Pydantic output schemas
+
+All AI responses must be parsed into Pydantic models. Reject if parsing fails.
+
+```python
+class ClassificationResult(BaseModel):
+    doc_type: str              # one of: cong_van, quyet_dinh, thong_bao, to_trinh, bao_cao, other
+    confidence: float
+    rationale: str
+    issuing_agency: str | None = None
+    urgency: str = "normal"   # normal | urgent | critical
+    confidentiality: str = "unclassified"  # unclassified | confidential | secret | top_secret
+
+class SummaryResult(BaseModel):
+    summary_points: list[str]
+    key_subject: str
+    key_entities: list[str]
+
+class RoutingResult(BaseModel):
+    suggested_department: str
+    secondary_department: str | None = None
+    routing_confidence: float
+    routing_rationale: str
+    needs_consultation: bool = False
+    needs_supervisor_review: bool = False
+
+class EscalationResult(BaseModel):
+    primary_recommendation: str
+    alternatives: list[str]
+    ambiguity_explanation: str
+    confidence_per_department: dict[str, float]
+    final_confidence: float
+    needs_consultation: bool
+    consultation_reason: str | None = None
+
+class EmbeddingResult(BaseModel):
+    embedding: list[float]
+    model: str
+    total_tokens: int
+
+class RerankResult(BaseModel):
+    index: int
+    relevance_score: float
+    text: str
+
+class OCRResult(BaseModel):
+    text: str
+    page_count: int = 1
+    extraction_method: str = "qwen-ocr"
+    warnings: list[str] = []
+```
+
+---
+
+### 17.5 Prompt templates
+
+Prompts are stored as `.txt` files in `api/prompts/` with `{text}` and `{departments}` placeholders. Load at runtime, substitute before calling the model. Never embed prompts as string literals in source files.
+
+Example prompt structure for classification:
+```
+Classify the following Vietnamese administrative document. Return ONLY a JSON object with these fields:
+
+{
+  "doc_type": "<one of: cong_van, quyet_dinh, thong_bao, to_trinh, bao_cao, other>",
+  "confidence": <float between 0.0 and 1.0>,
+  "rationale": "<brief explanation in English>",
+  "issuing_agency": "<guessed issuing agency or null>",
+  "urgency": "<one of: normal, urgent, critical>",
+  "confidentiality": "<one of: unclassified, confidential, secret, top_secret>"
+}
+
+Document text:
+---
+{text}
+---
+```
+
+For routing, inject the department list as `{departments}` with format `- {id}: {name}` per line.
+
+---
+
+### 17.6 Config file format
+
+`api/config/models.yaml`:
+```yaml
+models:
+  classify:
+    model: "qwen-plus"
+    api: "openai"
+    temperature: 0.1
+    max_tokens: 1024
+  summarize:
+    model: "qwen-plus"
+    api: "openai"
+    temperature: 0.3
+    max_tokens: 512
+  route:
+    model: "qwen-plus"
+    api: "openai"
+    temperature: 0.1
+    max_tokens: 1024
+  escalate:
+    model: "qwen-max"
+    api: "openai"
+    temperature: 0.2
+    max_tokens: 2048
+  ocr:
+    model: "qwen-vl-plus"
+    api: "openai"
+    temperature: 0.0
+    max_tokens: 2048
+  embed:
+    model: "text-embedding-v4"
+    api: "openai"
+    dimensions: 1024
+  rerank:
+    model: "qwen3-rerank"
+    api: "dashscope"
+    top_n: 5
+```
+
+---
+
+### 17.7 Credential check implementation
+
+`make check-credentials` must run a minimal live probe for each model:
+
+| Model key | Check method |
+|---|---|
+| `classify` | `chat_completion([{"role":"user","content":"Say 'OK' and nothing else."}], max_tokens=10)` |
+| `escalate` | Same as classify |
+| `embed` | `embeddings(["test"])` |
+| `ocr` | `ocr(base64_of_1x1_white_png)` |
+| `rerank` | `rerank("test query", ["test document"], top_n=1)` |
+
+Return dict `{label: True | "FAILED: <msg>"}`. Exit non-zero if any entry is not `True`.
+
+---
+
+### 17.8 PDF extraction strategy
+
+For born-digital PDFs: use `pypdf` to extract text directly. Tag as `extraction_method="pypdf"`.
+
+For scan-only PDFs (no embedded text): render pages to PNG with `pdf2image` (requires `poppler`), then call OCR. Tag as `extraction_method="render_ocr"` with a warning. If `pdf2image` is unavailable, fail explicitly.
+
+Decision logic:
+1. Try `pypdf` extraction.
+2. If `has_text=False`, try `pdf2image` render + OCR per page (up to `max_pages=3`).
+3. If both fail, return explicit error — do not fake successful extraction.
+
+---
+
+### 17.9 Test markers (pytest)
+
+All AI adapter tests must use markers consistent with the reference pattern:
+
+| Marker | Meaning | Gated by |
+|---|---|---|
+| `@pytest.mark.unit` | No API, runs in `make ci` | Always runs |
+| `@pytest.mark.contract` | No API, schema checks, runs in `make ci` | Always runs |
+| `@pytest.mark.live` | Real API call | `--live` CLI flag |
+| `@pytest.mark.creds` | Credential check | `--creds` CLI flag |
+| `@pytest.mark.integration` | Full pipeline with real API | `--integration` CLI flag |
+
+`conftest.py` must gate live/creds/integration tests behind CLI flags so `make test` (no flags) never calls external APIs.
