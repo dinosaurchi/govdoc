@@ -1,6 +1,16 @@
 # Prevent local dev artefacts from leaking into the Docker image
 api/data/
-data/
+data/**
+!data/incoming/
+!data/incoming/cong-van/
+!data/incoming/cong-van/cong-van_quang-ngai_son-mai_dang-ky-mua-sam-xe-o-to.pdf
+!data/hard-cases/
+!data/hard-cases/multi-department/
+!data/hard-cases/multi-department/01_cong-van_moj_y-kien-co-quan.pdf
+!data/hard-cases/scanned-low-quality/
+!data/hard-cases/scanned-low-quality/01_scan_cong-van_dong-nai_297_ubnd-ttpvhcc_p1.pdf
+!data/hard-cases/out-of-scope/
+!data/hard-cases/out-of-scope/04_thong-bao_hai-phong_lac-phuong_lich-lam-viec-tuan.pdf
 .venv/
 .git/
 .ai/

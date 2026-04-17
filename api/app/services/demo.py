@@ -7,21 +7,29 @@ from typing import List
 
 from sqlalchemy.orm import Session
 
-from app.models.system import Role, Department, DemoScenario
+from app.models.system import Role, Department, DemoScenario, AuditEvent
 from app.models.document import (
+    AIAnalysis,
     Document,
     DocumentFile,
     DocumentStatus,
+    ExtractedArtifact,
+    RoutingDecision,
+    RoutingDecisionType,
     SecurityLevel,
     Urgency,
+    ConsultationNote,
 )
 from app.core.config import settings
 from app.core.config_loader import load_roles_config
+from app.services.audit_service import write_audit_event
+from app.services.workflow import validate_transition
 
 # Resolve paths relative to the project root regardless of CWD
 # demo.py is at: api/app/services/demo.py  → 3 parents up = api/ , 4 = project root
 _API_ROOT = Path(__file__).resolve().parent.parent.parent  # api/
 _PROJECT_ROOT = _API_ROOT.parent  # govdoc/
+_PACKAGED_DEMO_DATA_ROOT = Path("/app/demo-data")
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +128,50 @@ DEMO_SCENARIO_FIXTURES = [
 ]
 
 
+DEMO_WORKFLOW_PLANS = {
+    "hero-001": {
+        "department_id": "phong_tai_chinh",
+        "assigned_reviewer_role": "reviewer",
+        "routing_decision": RoutingDecisionType.accepted,
+        "routing_rationale": "Procurement-related administrative request routed to Finance for final response preparation.",
+        "final_status": DocumentStatus.closed,
+    },
+    "ambiguity-001": {
+        "department_id": "phong_phap_che",
+        "assigned_reviewer_role": "reviewer",
+        "routing_decision": RoutingDecisionType.accepted,
+        "routing_rationale": "Multi-department legal interpretation requires Legal to lead with consultant input before closeout.",
+        "final_status": DocumentStatus.in_consultation,
+        "consultation_notes": [
+            {
+                "author_role": "reviewer",
+                "target_role": "consultant",
+                "body": "Please confirm whether the Ministry of Justice guidance should be handled primarily by Legal or escalated jointly with Planning.",
+            },
+            {
+                "author_role": "consultant",
+                "target_role": "reviewer",
+                "body": "Initial review suggests Legal should lead, but the final response should reference Planning impact before issuance.",
+            },
+        ],
+    },
+    "scan-001": {
+        "department_id": "phong_hanh_chinh",
+        "assigned_reviewer_role": "reviewer",
+        "routing_decision": RoutingDecisionType.accepted,
+        "routing_rationale": "OCR recovered sufficient administrative content for reviewer closeout preparation.",
+        "final_status": DocumentStatus.under_review,
+    },
+    "out-of-scope-001": {
+        "department_id": None,
+        "assigned_reviewer_role": "reviewer",
+        "routing_decision": RoutingDecisionType.out_of_scope,
+        "routing_rationale": "Document is an internal weekly schedule and falls outside the intake workflow scope.",
+        "final_status": DocumentStatus.out_of_scope,
+    },
+}
+
+
 # ---------------------------------------------------------------------------
 # DemoService — for demo scenarios endpoint
 # ---------------------------------------------------------------------------
@@ -164,6 +216,20 @@ class DemoService:
             "original_filename": original_filename,
         }
 
+    def _resolve_fixture_path(self, relative_path: str) -> Path:
+        candidate = _PROJECT_ROOT / relative_path
+        if candidate.exists():
+            return candidate
+
+        relative = Path(relative_path)
+        packaged = _PACKAGED_DEMO_DATA_ROOT / (
+            relative.relative_to("data") if relative.parts and relative.parts[0] == "data" else relative
+        )
+        if packaged.exists():
+            return packaged
+
+        raise FileNotFoundError(f"Demo fixture not found: {candidate}")
+
     async def seed_scenarios(self) -> List[Document]:
         """Seed the four canonical demo scenarios using bundled hard-case PDFs.
 
@@ -180,7 +246,7 @@ class DemoService:
             if existing:
                 continue
 
-            src_path = _PROJECT_ROOT / fixture["path"]
+            src_path = self._resolve_fixture_path(fixture["path"])
             doc_id = str(uuid.uuid4())
 
             file_meta = self._store_fixture_file(doc_id, src_path)
@@ -231,9 +297,7 @@ class DemoService:
         Uses the OCR fallback for scan PDFs. Fails fast on the first error so
         operators can see exactly which scenario broke.
         """
-        from app.models.document import ExtractedArtifact, ExtractionMethod
         from app.services.ai.analysis_service import AnalysisService
-        from app.services.audit_service import write_audit_event
         from app.services.extraction.real_extractor import RealExtractor
         from app.services.storage import LocalFileStorage
 
@@ -257,43 +321,186 @@ class DemoService:
                 .filter_by(document_id=doc.id)
                 .first()
             )
-            if existing_artifact:
+            existing_analyses = (
+                self.db.query(AIAnalysis)
+                .filter_by(document_id=doc.id)
+                .count()
+            )
+            if existing_artifact and existing_analyses >= 3:
                 continue
 
-            doc_file = next((f for f in doc.files if f.is_primary), None) or (
-                doc.files[0] if doc.files else None
-            )
-            if not doc_file:
-                raise FileNotFoundError(
-                    f"Seeded scenario {scenario.id} has no file attached"
+            if existing_artifact:
+                if not existing_artifact.text:
+                    raise ValueError(f"Seeded scenario {scenario.id} has an empty extracted artifact")
+                doc.status = DocumentStatus.extracted
+                analysis_svc.analyze_document(doc, existing_artifact.text, role_id="supervisor")
+            else:
+                doc_file = next((f for f in doc.files if f.is_primary), None) or (
+                    doc.files[0] if doc.files else None
+                )
+                if not doc_file:
+                    raise FileNotFoundError(
+                        f"Seeded scenario {scenario.id} has no file attached"
+                    )
+
+                full_path = str(storage.root / doc_file.storage_key)
+                result = extractor.extract_text(full_path, doc_file.original_filename, doc_file.mime_type)
+                if not extractor.has_text(result):
+                    result = extractor.extract_with_ocr(full_path, doc_file.mime_type, ai_provider.ocr)
+
+                artifact = ExtractedArtifact(
+                    id=str(uuid.uuid4()),
+                    document_id=doc.id,
+                    extraction_method=result.method,
+                    text=result.text,
+                    page_count=result.page_count,
+                    warnings=result.warnings,
+                )
+                self.db.add(artifact)
+                doc.status = DocumentStatus.extracted
+                write_audit_event(
+                    self.db,
+                    document_id=doc.id,
+                    actor_role="supervisor",
+                    event_type="extraction.completed",
+                    metadata_json={"method": result.method.value, "pages": result.page_count},
                 )
 
-            full_path = str(storage.root / doc_file.storage_key)
-            result = extractor.extract_text(full_path, doc_file.original_filename, doc_file.mime_type)
-            if not extractor.has_text(result):
-                result = extractor.extract_with_ocr(full_path, doc_file.mime_type, ai_provider.ocr)
-
-            artifact = ExtractedArtifact(
-                id=str(uuid.uuid4()),
-                document_id=doc.id,
-                extraction_method=result.method,
-                text=result.text,
-                page_count=result.page_count,
-                warnings=result.warnings,
-            )
-            self.db.add(artifact)
-            doc.status = DocumentStatus.extracted
-            write_audit_event(
-                self.db,
-                document_id=doc.id,
-                actor_role="supervisor",
-                event_type="extraction.completed",
-                metadata_json={"method": result.method.value, "pages": result.page_count},
-            )
-
-            analysis_svc.analyze_document(doc, result.text, role_id="supervisor")
+                analysis_svc.analyze_document(doc, result.text, role_id="supervisor")
             self.db.commit()
             self.db.refresh(doc)
             processed.append(doc)
 
         return processed
+
+    def stage_seeded_documents(self) -> List[Document]:
+        """Normalize seeded scenarios into a realistic cross-page demo state."""
+        scenarios = self.db.query(DemoScenario).all()
+        docs_by_scenario: list[tuple[DemoScenario, Document]] = []
+        for scenario in scenarios:
+            if not scenario.document_id:
+                continue
+            doc = self.db.query(Document).filter_by(id=scenario.document_id).first()
+            if not doc:
+                continue
+            docs_by_scenario.append((scenario, doc))
+
+        doc_ids = [doc.id for _, doc in docs_by_scenario]
+        if not doc_ids:
+            return []
+
+        self.db.query(ConsultationNote).filter(
+            ConsultationNote.document_id.in_(doc_ids)
+        ).delete(synchronize_session=False)
+        self.db.query(RoutingDecision).filter(
+            RoutingDecision.document_id.in_(doc_ids)
+        ).delete(synchronize_session=False)
+        self.db.query(AuditEvent).filter(
+            AuditEvent.document_id.in_(doc_ids),
+            AuditEvent.event_type.notin_(("ai.call", "extraction.completed")),
+        ).delete(synchronize_session=False)
+        self.db.flush()
+
+        staged: list[Document] = []
+        for scenario, doc in docs_by_scenario:
+            if not doc.artifacts:
+                raise ValueError(f"Seeded scenario {scenario.id} is missing extracted artifacts")
+            if len(doc.analyses) < 3:
+                raise ValueError(f"Seeded scenario {scenario.id} is missing AI analyses")
+
+            plan = DEMO_WORKFLOW_PLANS.get(scenario.id)
+            if not plan:
+                continue
+
+            doc.status = DocumentStatus.analyzed
+            doc.assigned_department_id = None
+            doc.assigned_reviewer_role = None
+            self.db.flush()
+
+            self._apply_workflow_plan(doc, plan)
+            staged.append(doc)
+
+        self.db.commit()
+        for doc in staged:
+            self.db.refresh(doc)
+        return staged
+
+    async def seed_demo_ready(self, ai_provider, prompt_registry) -> List[Document]:
+        """Create files, run extract/analyze as needed, and stage a demo-ready workflow spread."""
+        await self.seed_scenarios()
+        self.analyze_seeded(ai_provider, prompt_registry)
+        return self.stage_seeded_documents()
+
+    def _apply_workflow_plan(self, doc: Document, plan: dict) -> None:
+        department_id = plan["department_id"]
+        reviewer_role = plan["assigned_reviewer_role"]
+        decision = plan["routing_decision"]
+        rationale = plan["routing_rationale"]
+        final_status = plan["final_status"]
+
+        self._transition_document(doc, DocumentStatus.routed, actor_role=reviewer_role)
+        self.db.add(
+            RoutingDecision(
+                id=str(uuid.uuid4()),
+                document_id=doc.id,
+                suggested_department_id=department_id,
+                final_department_id=department_id,
+                decided_by_role=reviewer_role,
+                decision=decision,
+                rationale=rationale,
+            )
+        )
+        doc.assigned_department_id = department_id
+        doc.assigned_reviewer_role = reviewer_role
+        self.db.flush()
+
+        if final_status == DocumentStatus.under_review:
+            self._transition_document(doc, DocumentStatus.under_review, actor_role=reviewer_role)
+            return
+
+        if final_status == DocumentStatus.in_consultation:
+            self._transition_document(doc, DocumentStatus.under_review, actor_role=reviewer_role)
+            self._add_consultation_notes(doc.id, plan["consultation_notes"])
+            self._transition_document(doc, DocumentStatus.in_consultation, actor_role=reviewer_role)
+            return
+
+        if final_status == DocumentStatus.closed:
+            self._transition_document(doc, DocumentStatus.under_review, actor_role=reviewer_role)
+            self._transition_document(doc, DocumentStatus.approved, actor_role="supervisor")
+            self._transition_document(doc, DocumentStatus.closed, actor_role="supervisor")
+            return
+
+        if final_status == DocumentStatus.out_of_scope:
+            self._transition_document(doc, DocumentStatus.out_of_scope, actor_role=reviewer_role)
+            return
+
+        raise ValueError(f"Unsupported demo final status: {final_status}")
+
+    def _transition_document(self, doc: Document, target: DocumentStatus, *, actor_role: str) -> None:
+        if doc.status == target:
+            return
+        validate_transition(doc.status, target)
+        from_state = doc.status.value
+        doc.status = target
+        write_audit_event(
+            self.db,
+            document_id=doc.id,
+            actor_role=actor_role,
+            event_type="workflow.transition",
+            from_state=from_state,
+            to_state=target.value,
+        )
+        self.db.flush()
+
+    def _add_consultation_notes(self, document_id: str, notes: list[dict]) -> None:
+        for note in notes:
+            self.db.add(
+                ConsultationNote(
+                    id=str(uuid.uuid4()),
+                    document_id=document_id,
+                    author_role=note["author_role"],
+                    target_role=note.get("target_role"),
+                    body=note["body"],
+                )
+            )
+        self.db.flush()

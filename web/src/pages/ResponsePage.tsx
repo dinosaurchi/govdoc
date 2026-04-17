@@ -33,7 +33,7 @@ export default function ResponsePage() {
     try {
       const data = await apiGet<ResponseListDoc[]>('/documents/', role);
       const respDocs = data.filter((d) =>
-        ['approved', 'closed', 'routed', 'under_review'].includes(d.status)
+        ['approved', 'closed', 'under_review'].includes(d.status)
       );
       setDocuments(respDocs);
       setSelectedDocId((prev) => {
@@ -53,7 +53,7 @@ export default function ResponsePage() {
       try {
         const data = await apiGet<ResponseListDoc[]>('/documents/', role);
         const respDocs = data.filter((d) =>
-          ['approved', 'closed', 'routed', 'under_review'].includes(d.status)
+          ['approved', 'closed', 'under_review'].includes(d.status)
         );
         if (active) {
           setDocuments(respDocs);

@@ -20,6 +20,7 @@ RUN pip install --no-cache-dir -r /app/api/requirements.txt
 
 # Copy application code — preserve api/ subdirectory so path resolution works
 COPY api/ /app/api/
+COPY data/ /app/demo-data/
 
 # Ensure Python can find the 'app' package inside api/
 ENV PYTHONPATH=/app/api

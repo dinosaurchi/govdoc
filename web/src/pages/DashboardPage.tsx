@@ -2,13 +2,15 @@ import { useEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui-card';
 import { BarChart3, PieChart, TrendingUp, Users, FileCheck, Layers } from 'lucide-react';
 import { apiGet } from '@/lib/api';
+import { useRole } from '@/hooks/use-role';
 
 export default function DashboardPage() {
+  const { role } = useRole();
   const [metrics, setMetrics] = useState<any>(null);
 
   useEffect(() => {
-    apiGet('/dashboard/stats').then(setMetrics).catch(console.error);
-  }, []);
+    apiGet('/dashboard/stats', role).then(setMetrics).catch(console.error);
+  }, [role]);
 
   const stats = [
     { label: 'Total Received', value: metrics?.total_received || '...', icon: <Layers className="text-blue-600" />, trend: '+12%' },

@@ -23,7 +23,8 @@ async def get_dashboard_stats(
         "pending_review": stats_map.get(DocumentStatus.received, 0)
         + stats_map.get(DocumentStatus.extracted, 0)
         + stats_map.get(DocumentStatus.analyzed, 0)
-        + stats_map.get(DocumentStatus.routed, 0),
+        + stats_map.get(DocumentStatus.routed, 0)
+        + stats_map.get(DocumentStatus.under_review, 0),
         "under_consultation": stats_map.get(DocumentStatus.in_consultation, 0),
         "closed_today": stats_map.get(DocumentStatus.closed, 0) + stats_map.get(DocumentStatus.approved, 0),
     }
