@@ -14,9 +14,9 @@ fail() {
 }
 
 check_http() {
-  local name="$1" url="$2" expect="${3:-200}" extra_headers="${4:-}"
+  local name="$1" url="$2" expect="${3:-200}"; shift 3
   local code
-  code="$(curl -sS -o /dev/null -w '%{http_code}' $extra_headers "$url" || true)"
+  code="$(curl -sS -o /dev/null -w '%{http_code}' "$@" "$url" || true)"
   if [[ "$code" != "$expect" ]]; then
     fail "$name expected HTTP $expect from $url, got $code"
   fi
@@ -41,7 +41,7 @@ check_http "4. Meta roles" "$API_URL/api/v1/meta/roles"
 check_http "5. Meta departments" "$API_URL/api/v1/meta/departments"
 
 # 6. Documents list with role
-check_http "6. Documents list" "$API_URL/api/v1/documents/" 200 "-H '$ROLE_HEADER'"
+check_http "6. Documents list" "$API_URL/api/v1/documents/" 200 "-H" "$ROLE_HEADER"
 
 # 7. Demo scenarios
 check_http "7. Demo scenarios" "$API_URL/api/v1/demo/scenarios"
