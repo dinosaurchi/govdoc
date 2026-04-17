@@ -10,6 +10,7 @@ import {
   isTerminalStatus,
   canAnalyze,
   canApproveRouting,
+  canReroute,
   canRequestConsultation,
   canResolveConsultation,
   canEscalate,
@@ -101,6 +102,30 @@ describe('canApproveRouting', () => {
     expect(canApproveRouting(doc({ status: 'under_review' }))).toBe(false);
     expect(canApproveRouting(doc({ status: 'routed' }))).toBe(false);
     expect(canApproveRouting(doc({ status: 'closed' }))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// canReroute
+// ---------------------------------------------------------------------------
+
+describe('canReroute', () => {
+  it('returns true for under_review', () => {
+    expect(canReroute(doc({ status: 'under_review' }))).toBe(true);
+  });
+
+  it('returns false for in_consultation', () => {
+    expect(canReroute(doc({ status: 'in_consultation' }))).toBe(false);
+  });
+
+  it('returns false for closed', () => {
+    expect(canReroute(doc({ status: 'closed' }))).toBe(false);
+  });
+
+  it('returns false for other statuses', () => {
+    expect(canReroute(doc({ status: 'routed' }))).toBe(false);
+    expect(canReroute(doc({ status: 'approved' }))).toBe(false);
+    expect(canReroute(doc({ status: 'analyzed' }))).toBe(false);
   });
 });
 
@@ -260,6 +285,20 @@ describe('getWorkflowActionStates', () => {
     // approve-routing should be disabled (not analyzed)
     const disabledIds = states.disabled.map((d) => d.action.id);
     expect(disabledIds).toContain('approve-routing');
+  });
+
+  it('shows reroute as available for reviewer on under_review doc', () => {
+    const states = getWorkflowActionStates(doc({ status: 'under_review' }), 'reviewer');
+    const availableIds = states.available.map((a) => a.id);
+    expect(availableIds).toContain('reroute');
+  });
+
+  it('shows reroute as disabled for reviewer on in_consultation doc', () => {
+    const states = getWorkflowActionStates(doc({ status: 'in_consultation' }), 'reviewer');
+    const availableIds = states.available.map((a) => a.id);
+    expect(availableIds).not.toContain('reroute');
+    const disabledIds = states.disabled.map((d) => d.action.id);
+    expect(disabledIds).toContain('reroute');
   });
 
   it('shows resolve-consultation for reviewer on in_consultation doc with unresolved notes', () => {

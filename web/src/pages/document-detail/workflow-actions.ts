@@ -89,9 +89,9 @@ export function canApproveRouting(doc: DocContext): boolean {
   return doc.status === 'analyzed';
 }
 
-/** Reviewer/supervisor, status must be under_review or in_consultation. */
+/** Reviewer/supervisor, status must be under_review. */
 export function canReroute(doc: DocContext): boolean {
-  return doc.status === 'under_review' || doc.status === 'in_consultation';
+  return doc.status === 'under_review';
 }
 
 /** Reviewer/supervisor, status must be under_review or routed. */
@@ -164,8 +164,8 @@ const WORKFLOW_ACTIONS: readonly WorkflowAction[] = [
     allowedRoles: ['reviewer', 'supervisor'],
     isAvailable: canReroute,
     getDisabledReason: (doc) => {
-      if (doc.status !== 'under_review' && doc.status !== 'in_consultation') {
-        return 'Only available while document is under review or in consultation';
+      if (doc.status !== 'under_review') {
+        return 'Only available while the document is under review';
       }
       return null;
     },
