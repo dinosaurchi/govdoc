@@ -93,6 +93,7 @@ class DocumentListOut(BaseModel):
     security_level: str
     urgency: str
     created_at: datetime
+    consultation_notes: list[ConsultationNoteOut] = []
 
     class Config:
         from_attributes = True

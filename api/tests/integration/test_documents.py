@@ -113,6 +113,9 @@ class TestDocumentList:
         data = resp.json()
         assert isinstance(data, list)
         assert len(data) >= 1
+        for doc in data:
+            assert "consultation_notes" in doc
+            assert isinstance(doc["consultation_notes"], list)
 
     def test_list_documents_with_status_filter(self, client, clerk_headers):
         resp = client.get("/api/v1/documents/?status=analyzed", headers=clerk_headers)
