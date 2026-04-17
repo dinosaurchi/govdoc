@@ -19,3 +19,4 @@ deploy/bundle/
 web/dist/
 .secrets/
 web/test-results
+.ai/tmp
