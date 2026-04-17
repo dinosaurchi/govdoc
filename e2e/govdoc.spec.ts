@@ -469,6 +469,80 @@ test.describe('GovDoc E2E — Full document workflow', () => {
   });
 
   // =========================================================================
+  // Step 9b — Consultation chat: own messages align right, others left,
+  // sorted chronologically, consultant can reply (FEEDBACK-05)
+  // =========================================================================
+  test('Step 9b: Consultation chat bubbles align by role and sort chronologically (FEEDBACK-05)', async ({ page }) => {
+    // Start as reviewer and open the seed doc that is already in_consultation
+    await page.goto('/consultation');
+    await idle(page);
+    await switchRole(page, 'Department Reviewer');
+    await page.waitForTimeout(1500);
+
+    // Pick the first consultation card (demo seed always has at least one)
+    const card = page.locator('div[role="button"]').first();
+    await expect(card).toBeVisible({ timeout: 10000 });
+    await card.click();
+    await page.waitForTimeout(500);
+
+    const composer = page.locator('[data-testid="consultation-composer"]');
+    await expect(composer).toBeVisible();
+
+    // Reviewer sends a message — should appear on the right (own)
+    const input = page.locator('[data-testid="consultation-input"]');
+    await input.fill('Reviewer ping');
+    const [reviewerResp] = await Promise.all([
+      page.waitForResponse(r => /\/consultation\/.+\/notes|\/request-consultation/.test(r.url()) && r.request().method() === 'POST'),
+      page.locator('[data-testid="consultation-send"]').click(),
+    ]);
+    expect([200, 204]).toContain(reviewerResp.status());
+    await page.waitForTimeout(1500);
+
+    const reviewerBubble = page.locator('[data-testid="consultation-message"]').filter({ hasText: 'Reviewer ping' });
+    await expect(reviewerBubble).toHaveAttribute('data-own', 'true');
+    await expect(reviewerBubble).toHaveAttribute('data-author-role', 'reviewer');
+
+    // Switch to Consultant and post a reply — should appear on the right (own)
+    // while the reviewer's earlier message is now rendered on the left (other).
+    await switchRole(page, 'Consultant');
+    await page.waitForTimeout(1500);
+    // The same thread should remain selected since we preserve selection.
+    const consultantComposer = page.locator('[data-testid="consultation-composer"]');
+    await expect(consultantComposer).toBeVisible({ timeout: 5000 });
+    await page.locator('[data-testid="consultation-input"]').fill('Consultant reply');
+    const [consultantResp] = await Promise.all([
+      page.waitForResponse(r => /\/consultation\/.+\/notes/.test(r.url()) && r.request().method() === 'POST'),
+      page.locator('[data-testid="consultation-send"]').click(),
+    ]);
+    expect([200, 204]).toContain(consultantResp.status());
+    await page.waitForTimeout(1500);
+
+    // Reviewer's message is now an "other" bubble (left)
+    const reviewerBubbleAsOther = page.locator('[data-testid="consultation-message"]').filter({ hasText: 'Reviewer ping' });
+    await expect(reviewerBubbleAsOther).toHaveAttribute('data-own', 'false');
+    await expect(reviewerBubbleAsOther).toHaveAttribute('data-author-role', 'reviewer');
+
+    // Consultant's new message is on the right (own)
+    const consultantBubble = page.locator('[data-testid="consultation-message"]').filter({ hasText: 'Consultant reply' });
+    await expect(consultantBubble).toHaveAttribute('data-own', 'true');
+    await expect(consultantBubble).toHaveAttribute('data-author-role', 'consultant');
+
+    // Chronological order: Reviewer ping comes before Consultant reply
+    const bubbleTexts = await page.locator('[data-testid="consultation-message"]').allTextContents();
+    const idxReviewer = bubbleTexts.findIndex(t => t.includes('Reviewer ping'));
+    const idxConsultant = bubbleTexts.findIndex(t => t.includes('Consultant reply'));
+    expect(idxReviewer).toBeGreaterThanOrEqual(0);
+    expect(idxConsultant).toBeGreaterThan(idxReviewer);
+
+    // Intake Clerk can view but cannot reply
+    await switchRole(page, 'Intake Clerk');
+    await page.waitForTimeout(1000);
+    await expect(page.locator('[data-testid="consultation-composer"]')).toHaveCount(0);
+
+    expect(consoleErrors.filter(e => e.includes('TypeError'))).toHaveLength(0);
+  });
+
+  // =========================================================================
   // Step 10 — Consultant role works (BUG-004 fix)
   // =========================================================================
   test('Step 10: Consultant role works (BUG-004)', async ({ page }) => {
