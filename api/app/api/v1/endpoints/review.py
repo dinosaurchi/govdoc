@@ -235,6 +235,14 @@ async def mark_out_of_scope(
             detail={"error": {"code": "NOT_FOUND", "message": "Document not found", "details": {}}},
         )
 
+    try:
+        validate_transition(document.status, DocumentStatus.out_of_scope)
+    except InvalidTransitionError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"code": "INVALID_TRANSITION", "message": str(e), "details": {}}},
+        )
+
     old_status = document.status.value
     document.status = DocumentStatus.out_of_scope
     write_audit_event(

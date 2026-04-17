@@ -202,6 +202,7 @@ function DocumentDetailInner({ id }: { id: string }) {
 
   const primaryFile = doc.files[0];
   const primaryArtifact = doc.artifacts[0];
+  const hasConsultationThread = doc.consultation_notes.length > 0 || doc.status === 'in_consultation';
   const analysesByStage: Record<string, AIAnalysis> = {};
   for (const a of doc.analyses) {
     analysesByStage[a.stage] = a;
@@ -338,17 +339,22 @@ function DocumentDetailInner({ id }: { id: string }) {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
+                {doc.status === 'out_of_scope' && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    This document was later marked out of scope. The routing record below is preserved for audit history.
+                  </div>
+                )}
                 {doc.routing_decisions.map((dec) => (
                   <div key={dec.id} className="text-sm border-l-2 border-slate-200 pl-4 py-1 space-y-1">
                     <div className="flex items-center gap-2">
-                      <Badge variant={dec.decision === 'accepted' ? 'default' : 'secondary'} className="text-[9px]">
-                        {dec.decision}
+                      <Badge variant={dec.decision === 'accepted' ? 'default' : 'secondary'} className="text-[9px] uppercase">
+                        {humanizeEnum(dec.decision)}
                       </Badge>
                       {dec.suggested_department_id && (
-                        <span className="text-xs text-slate-500">Suggested: {dec.suggested_department_id}</span>
+                        <span className="text-xs text-slate-500">Suggested: {humanizeDepartment(dec.suggested_department_id)}</span>
                       )}
                       {dec.final_department_id && (
-                        <span className="text-xs font-bold text-slate-800">Final: {dec.final_department_id}</span>
+                        <span className="text-xs font-bold text-slate-800">Final: {humanizeDepartment(dec.final_department_id)}</span>
                       )}
                     </div>
                     {dec.rationale && <p className="text-xs text-slate-500 italic">&quot;{dec.rationale}&quot;</p>}
@@ -362,39 +368,41 @@ function DocumentDetailInner({ id }: { id: string }) {
           )}
 
           {/* Consultation Notes */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <MessageSquare size={18} className="text-purple-600" /> Consultation thread
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {doc.consultation_notes.length > 0 ? (
-                doc.consultation_notes.map((note) => (
-                  <div key={note.id} className="flex gap-4 p-4 rounded-2xl bg-slate-50 border border-slate-100">
-                    <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center shrink-0 border border-slate-200 shadow-sm">
-                      <User size={18} className="text-slate-400" />
-                    </div>
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-sm text-slate-900">{note.author_role}</span>
-                        {note.target_role && <span className="text-[10px] text-slate-400">→ {note.target_role}</span>}
-                        <span className="text-[10px] text-slate-400">
-                          {new Date(note.created_at).toLocaleTimeString()}
-                        </span>
-                        {note.resolved_at && <Badge variant="secondary" className="text-[9px]">Resolved</Badge>}
+          {hasConsultationThread && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <MessageSquare size={18} className="text-purple-600" /> Consultation thread
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {doc.consultation_notes.length > 0 ? (
+                  doc.consultation_notes.map((note) => (
+                    <div key={note.id} className="flex gap-4 p-4 rounded-2xl bg-slate-50 border border-slate-100">
+                      <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center shrink-0 border border-slate-200 shadow-sm">
+                        <User size={18} className="text-slate-400" />
                       </div>
-                      <p className="text-sm text-slate-600 leading-relaxed">{note.body}</p>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm text-slate-900">{note.author_role}</span>
+                          {note.target_role && <span className="text-[10px] text-slate-400">→ {note.target_role}</span>}
+                          <span className="text-[10px] text-slate-400">
+                            {new Date(note.created_at).toLocaleTimeString()}
+                          </span>
+                          {note.resolved_at && <Badge variant="secondary" className="text-[9px]">Resolved</Badge>}
+                        </div>
+                        <p className="text-sm text-slate-600 leading-relaxed">{note.body}</p>
+                      </div>
                     </div>
+                  ))
+                ) : (
+                  <div className="py-12 text-center text-slate-400">
+                    <p className="text-sm font-medium italic">Consultation is active, but no notes have been recorded yet.</p>
                   </div>
-                ))
-              ) : (
-                <div className="py-12 text-center text-slate-400">
-                  <p className="text-sm font-medium italic">No consultation notes yet.</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* Audit Events */}
           <Card>
@@ -847,6 +855,10 @@ function humanizeEnum(value: unknown): string {
   return text
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function humanizeDepartment(value: string): string {
+  return humanizeEnum(value);
 }
 
 function ActionButton({
