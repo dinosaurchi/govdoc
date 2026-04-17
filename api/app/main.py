@@ -6,6 +6,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
+from app.adapters.modelstudio.client import (
+    AIAuthError,
+    AIModelUnavailableError,
+    AIRateLimitError,
+    AISchemaInvalidError,
+    ModelStudioError,
+)
 from app.api.v1 import api_router
 from app.core.config import settings
 from app.core.config_loader import load_prompt_versions_config
@@ -69,6 +76,38 @@ async def invalid_transition_error_handler(request: Request, exc: InvalidTransit
     return JSONResponse(
         status_code=400,
         content={"error": {"code": "INVALID_TRANSITION", "message": str(exc), "details": {}}},
+    )
+
+
+@app.exception_handler(AIAuthError)
+async def ai_auth_handler(request: Request, exc: AIAuthError):
+    return JSONResponse(
+        status_code=502,
+        content={"error": {"code": "AI_AUTH_FAILED", "message": str(exc), "details": {}}},
+    )
+
+
+@app.exception_handler(AIModelUnavailableError)
+async def ai_model_unavailable_handler(request: Request, exc: AIModelUnavailableError):
+    return JSONResponse(
+        status_code=502,
+        content={"error": {"code": "AI_MODEL_UNAVAILABLE", "message": str(exc), "details": {}}},
+    )
+
+
+@app.exception_handler(AIRateLimitError)
+async def ai_rate_limit_handler(request: Request, exc: AIRateLimitError):
+    return JSONResponse(
+        status_code=429,
+        content={"error": {"code": "AI_RATE_LIMITED", "message": str(exc), "details": {}}},
+    )
+
+
+@app.exception_handler(AISchemaInvalidError)
+async def ai_schema_invalid_handler(request: Request, exc: AISchemaInvalidError):
+    return JSONResponse(
+        status_code=502,
+        content={"error": {"code": "AI_SCHEMA_INVALID", "message": str(exc), "details": {}}},
     )
 
 

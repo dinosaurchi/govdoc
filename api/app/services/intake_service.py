@@ -15,8 +15,24 @@ class IntakeService:
         self.storage = LocalFileStorage()
         self.extractor = RealExtractor()
 
-    def intake(self, filename: str, content: bytes, mime_type: str | None, role_id: str) -> dict:
-        """Process file upload: validate, store, extract, return document data."""
+    def intake(
+        self,
+        filename: str,
+        content: bytes,
+        mime_type: str | None,
+        role_id: str,
+        ai_provider=None,
+    ) -> dict:
+        """Process file upload: validate, store, extract, optionally run AI analysis.
+
+        Parameters
+        ----------
+        ai_provider : AIProvider | None
+            If provided and extraction succeeds with text, runs the AI analysis
+            pipeline (classify → summarize → route → optional escalate).
+            On AI failure the document is still created with extracted text; its
+            status is set to ``analysis_failed``.
+        """
         document_id = str(uuid.uuid4())
 
         # Validate file
@@ -83,5 +99,29 @@ class IntakeService:
         )
         self.db.add(artifact)
 
+        # ── AI analysis (optional, graceful degradation) ──────────────
+        ai_analyses = []
+        if ai_provider is not None and result.text:
+            from app.services.ai.analysis_service import AnalysisService
+
+            analysis_svc = AnalysisService(self.db, ai_provider, prompt_registry=None)
+            try:
+                ai_analyses = analysis_svc.analyze_document(
+                    document,
+                    result.text,
+                    role_id,
+                )
+            except Exception as e:
+                document.status = DocumentStatus.analysis_failed
+                write_audit_event(
+                    self.db,
+                    document_id=document_id,
+                    actor_role=role_id,
+                    event_type="analysis.failed",
+                    metadata_json={"error": str(e)},
+                )
+                self.db.flush()
+                # Don't raise — document is still created with extracted text
+
         self.db.flush()
-        return {"document": document, "file": doc_file, "artifact": artifact}
+        return {"document": document, "file": doc_file, "artifact": artifact, "ai_analyses": ai_analyses}

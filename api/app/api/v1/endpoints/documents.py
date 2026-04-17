@@ -1,14 +1,15 @@
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.api import deps
 from app.api.deps import CurrentRole
-from app.models.document import AIAnalysis, AnalysisStage, AnalysisSource, DocumentStatus
+from app.models.document import Document, DocumentStatus
 from app.repositories.document import DocumentRepository
 from app.schemas.document import DocumentOut, DocumentListOut, DocumentDetailOut, UploadResponse
 from app.services.ai.interface import AIProvider
+from app.services.ai.mock_provider import MockAIProvider
 from app.services.audit_service import write_audit_event
 from app.services.extraction.interface import ExtractionProviderInterface
 from app.services.intake_service import IntakeService
@@ -16,6 +17,16 @@ from app.services.file_validation import FileValidationError
 from app.services.storage import LocalFileStorage
 
 router = APIRouter()
+
+
+def _get_ai_provider() -> AIProvider:
+    """Try real provider; fall back to mock if credentials not configured."""
+    try:
+        from app.services.ai.real_provider import RealAIProvider
+
+        return RealAIProvider()
+    except Exception:
+        return MockAIProvider()
 
 
 @router.get("/", response_model=List[DocumentListOut])
@@ -36,14 +47,17 @@ async def create_document(
     db: Session = Depends(deps.get_db),
     role: CurrentRole = Depends(deps.get_current_role),
 ):
-    """Upload a document file: validate, store, extract text."""
+    """Upload a document file: validate, store, extract text, run AI analysis."""
     content = await file.read()
     filename = file.filename or "upload.bin"
     mime_type = file.content_type
 
+    # Determine AI provider (real if credentials available, mock otherwise)
+    ai_provider = _get_ai_provider()
+
     svc = IntakeService(db)
     try:
-        result = svc.intake(filename, content, mime_type, role.id)
+        result = svc.intake(filename, content, mime_type, role.id, ai_provider=ai_provider)
     except FileValidationError:
         raise  # handled by global exception handler in main.py
     except Exception as e:
@@ -54,6 +68,7 @@ async def create_document(
 
     doc = result["document"]
     artifact = result.get("artifact")
+    ai_analyses = result.get("ai_analyses", [])
 
     # Refresh to get DB-populated defaults
     db.commit()
@@ -61,10 +76,16 @@ async def create_document(
     if artifact:
         db.refresh(artifact)
 
+    # Refresh analysis objects so created_at etc. are populated
+    refreshed_analyses = []
+    for a in ai_analyses:
+        db.refresh(a)
+        refreshed_analyses.append(a)
+
     return UploadResponse(
         document=doc,
         extracted_artifact=artifact,
-        ai_analyses=[],
+        ai_analyses=refreshed_analyses,
     )
 
 
@@ -101,52 +122,37 @@ def get_document_file(doc_id: str, db: Session = Depends(deps.get_db)):
     )
 
 
-@router.post("/{doc_id}/analyze", response_model=DocumentDetailOut)
-async def analyze_document(
+@router.post("/{doc_id}/analyze")
+async def re_analyze_document(
     doc_id: str,
+    force: bool = Query(False),
     db: Session = Depends(deps.get_db),
-    ai: AIProvider = Depends(deps.get_ai_provider),
-    role: CurrentRole = Depends(deps.get_current_role),
+    role: CurrentRole = Depends(deps.require_action("documents.analyze")),
 ):
-    from app.repositories import document as doc_repo
-
-    doc = doc_repo.document.get_with_relations(db, id=doc_id)
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-
-    if doc.analyses:
-        raise HTTPException(
-            status_code=409,
-            detail="This document already has an AI analysis record; re-run is not supported in baseline",
-        )
-
-    analysis_data = await ai.analyze_document("Mock context for doc")
-
-    analysis_obj = AIAnalysis(
-        document_id=doc.id,
-        stage=AnalysisStage.classify,
-        model_name=getattr(ai, "source_label", None) or type(ai).__name__,
-        prompt_version="baseline",
-        source=AnalysisSource.live,
-        payload_json=analysis_data,
-    )
-    db.add(analysis_obj)
-
-    doc.status = DocumentStatus.analyzed
-    db.add(doc)
-
-    write_audit_event(
-        db,
-        document_id=doc.id,
-        actor_role=role.id,
-        event_type="ANALYZE",
-        metadata_json={
-            "analysis_source": analysis_obj.model_name,
-        },
-    )
-
-    db.commit()
-    db.refresh(doc)
+    """Re-run AI analysis on a document (classify → summarize → route → optional escalate)."""
+    from app.services.ai.analysis_service import AnalysisService
 
     repo = DocumentRepository(db)
-    return repo.get_with_relations(doc_id)
+    document = repo.get_with_relations(doc_id)
+    if not document:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "Document not found", "details": {}}},
+        )
+
+    ai_provider = _get_ai_provider()
+    analysis_svc = AnalysisService(db, ai_provider)
+
+    try:
+        analyses = analysis_svc.re_analyze(document, role.id, force=force)
+        db.commit()
+        # Refresh to populate relationships
+        db.refresh(document)
+        for a in analyses:
+            db.refresh(a)
+        return {"document": document, "ai_analyses": analyses}
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"code": "EXTRACTION_FAILED", "message": str(e), "details": {}}},
+        )

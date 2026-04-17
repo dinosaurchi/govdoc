@@ -49,7 +49,7 @@ class TestDocumentUpload:
         data = resp.json()
         assert "document" in data
         assert data["document"]["title"] == "test.txt"
-        assert data["document"]["status"] == "extracted"
+        assert data["document"]["status"] in ("extracted", "analyzed")
         assert data["extracted_artifact"] is not None
         assert "test document" in data["extracted_artifact"]["text"].lower()
 
@@ -63,7 +63,7 @@ class TestDocumentUpload:
         assert resp.status_code == 200, resp.text
         data = resp.json()
         assert data["document"]["title"] == "test.pdf"
-        assert data["document"]["status"] == "extracted"
+        assert data["document"]["status"] in ("extracted", "analyzed")
 
     def test_upload_empty_file_rejected(self, client, clerk_headers):
         resp = client.post(
@@ -115,12 +115,12 @@ class TestDocumentList:
         assert len(data) >= 1
 
     def test_list_documents_with_status_filter(self, client, clerk_headers):
-        resp = client.get("/api/v1/documents/?status=extracted", headers=clerk_headers)
+        resp = client.get("/api/v1/documents/?status=analyzed", headers=clerk_headers)
         assert resp.status_code == 200
         data = resp.json()
         assert isinstance(data, list)
         for doc in data:
-            assert doc["status"] == "extracted"
+            assert doc["status"] == "analyzed"
 
 
 @pytest.mark.mock_integration

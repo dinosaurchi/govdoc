@@ -34,24 +34,28 @@ class MockAIProvider(AIProvider):
         )
 
     def route(self, text: str, departments: list[dict]) -> RoutingResult:
+        dept_id = departments[0]["id"] if departments else "phong_hanh_chinh"
         return RoutingResult(
-            suggested_department="phong_hanh_chinh",
+            suggested_department=dept_id,
             secondary_department=None,
-            routing_confidence=0.75,
+            routing_confidence=0.9,
             routing_rationale="Mock routing rationale",
             needs_consultation=False,
             needs_supervisor_review=False,
         )
 
     def escalate(self, text: str, departments: list[dict]) -> EscalationResult:
+        dept_id = departments[0]["id"] if departments else "phong_hanh_chinh"
+        alt_ids = [d["id"] for d in departments[1:]] if len(departments) > 1 else []
+        conf_per_dept = {d["id"]: round(0.6 - i * 0.1, 2) for i, d in enumerate(departments)} if departments else {}
         return EscalationResult(
-            primary_recommendation="phong_hanh_chinh",
-            alternatives=["phong_phap_che"],
+            primary_recommendation=dept_id,
+            alternatives=alt_ids,
             ambiguity_explanation="Mock ambiguity",
-            confidence_per_department={"phong_hanh_chinh": 0.6, "phong_phap_che": 0.4},
-            final_confidence=0.6,
-            needs_consultation=False,
-            consultation_reason=None,
+            confidence_per_department=conf_per_dept,
+            final_confidence=0.5,
+            needs_consultation=True,
+            consultation_reason="Mock consultation reason",
         )
 
     def embed(self, texts: list[str]) -> list[EmbeddingResult]:
