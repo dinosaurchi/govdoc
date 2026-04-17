@@ -122,6 +122,8 @@ function DocumentDetailInner({ id }: { id: string }) {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showConsultInput, setShowConsultInput] = useState(false);
+  const [consultBody, setConsultBody] = useState('');
 
   const fetchDoc = async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
@@ -173,6 +175,8 @@ function DocumentDetailInner({ id }: { id: string }) {
         await apiPost(`/documents/${id}/close`, undefined, role);
       } else if (action === 'request-consultation') {
         await apiPost(`/documents/${id}/request-consultation`, payload, role);
+      } else if (action === 'resolve-consultation') {
+        await apiPost(`/documents/${id}/resolve-consultation/${payload.note_id}`, undefined, role);
       } else if (action === 'analyze') {
         await apiPost(`/documents/${id}/analyze`, undefined, role);
       }
@@ -427,13 +431,67 @@ function DocumentDetailInner({ id }: { id: string }) {
                 active={role === 'Department Reviewer' || role === 'Supervisor'}
                 variant="emerald"
               />
+              {/* Request consultation */}
+              {(role === 'Department Reviewer' || role === 'Supervisor') && (
+                <div className="space-y-2">
+                  {!showConsultInput ? (
+                    <ActionButton
+                      label="Request consultation"
+                      icon={<MessageSquare size={16} />}
+                      onClick={() => setShowConsultInput(true)}
+                      disabled={actionLoading || !['under_review', 'routed'].includes(doc.status)}
+                      active={true}
+                      variant="purple"
+                    />
+                  ) : (
+                    <div className="rounded-xl border border-purple-200 bg-purple-50/50 p-3 space-y-2">
+                      <textarea
+                        value={consultBody}
+                        onChange={(e) => setConsultBody(e.target.value)}
+                        placeholder="Describe what you need consulted on..."
+                        rows={3}
+                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 outline-none resize-none"
+                      />
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={actionLoading || !consultBody.trim()}
+                          onClick={() => {
+                            handleAction('request-consultation', { target_role: 'consultant', body: consultBody });
+                            setConsultBody('');
+                            setShowConsultInput(false);
+                          }}
+                          className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl font-bold text-sm hover:bg-purple-700 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {actionLoading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
+                          Send
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setShowConsultInput(false); setConsultBody(''); }}
+                          className="px-3 py-2 text-slate-500 hover:text-slate-700 text-sm font-medium rounded-xl hover:bg-slate-100 transition"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {/* Resolve consultation */}
               <ActionButton
-                label="Request consultation"
-                icon={<MessageSquare size={16} />}
-                onClick={() => handleAction('request-consultation', { target_role: 'consultant', body: 'Consultation requested from document detail.' })}
-                disabled={actionLoading || !['under_review', 'routed'].includes(doc.status)}
-                active={role === 'Department Reviewer' || role === 'Supervisor'}
-                variant="purple"
+                label="Resolve consultation"
+                icon={<CheckCircle2 size={16} />}
+                onClick={() => {
+                  const unresolved = doc.consultation_notes.filter((n) => n.resolved_at === null);
+                  const mostRecent = unresolved[unresolved.length - 1];
+                  if (mostRecent) {
+                    handleAction('resolve-consultation', { note_id: mostRecent.id });
+                  }
+                }}
+                disabled={actionLoading || doc.status !== 'in_consultation' || !doc.consultation_notes.some((n) => n.resolved_at === null)}
+                active={role === 'Department Reviewer' || role === 'Supervisor' || role === 'Consultant'}
+                variant="emerald"
               />
               <ActionButton
                 label="Escalate to supervisor"
