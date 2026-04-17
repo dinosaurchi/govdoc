@@ -82,6 +82,14 @@ async def reroute_document(
         )
 
     old_status = document.status.value
+    try:
+        validate_transition(document.status, DocumentStatus.routed)
+    except InvalidTransitionError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"code": "INVALID_TRANSITION", "message": str(e), "details": {}}},
+        )
+
     routing = RoutingDecision(
         id=str(uuid.uuid4()),
         document_id=document_id,
@@ -184,6 +192,14 @@ async def resolve_consultation(
     document = db.query(Document).filter(Document.id == document_id).first()
     if document:
         old_status = document.status.value
+        try:
+            validate_transition(document.status, DocumentStatus.under_review)
+        except InvalidTransitionError as e:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": {"code": "INVALID_TRANSITION", "message": str(e), "details": {}}},
+            )
+
         document.status = DocumentStatus.under_review
         write_audit_event(
             db,
