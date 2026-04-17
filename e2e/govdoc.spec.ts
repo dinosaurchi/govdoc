@@ -189,6 +189,34 @@ test.describe('GovDoc E2E — Full document workflow', () => {
   });
 
   // =========================================================================
+  // Step 3c — File metadata size is human readable (FEEDBACK-04)
+  // =========================================================================
+  test('Step 3c: File metadata shows human-readable size (FEEDBACK-04)', async ({ page }) => {
+    await page.goto('/');
+    await idle(page);
+    await switchRole(page, 'Department Reviewer');
+    await page.locator('nav').getByText('Review', { exact: true }).click();
+    await expect(page).toHaveURL(/\/review$/);
+    await page.waitForTimeout(2000);
+
+    const row = page.locator('table tbody tr').first();
+    await row.waitFor({ state: 'visible' });
+    await row.click();
+    await expect(page).toHaveURL(/\/documents\/[^/]+$/);
+    await idle(page);
+
+    const size = page.locator('[data-testid="file-size"]');
+    await expect(size).toBeVisible({ timeout: 5000 });
+    const text = (await size.textContent()) ?? '';
+    // Must contain one of the human-readable units (not just raw "bytes")
+    expect(text).toMatch(/\b(?:B|KB|MB|GB|TB)\b/);
+    // And must also keep the exact byte count for clarity
+    expect(text).toMatch(/\d[\d,]*\s*bytes/);
+
+    expect(consoleErrors.filter(e => e.includes('TypeError'))).toHaveLength(0);
+  });
+
+  // =========================================================================
   // Step 4 — Review queue shows documents
   // =========================================================================
   test('Step 4: Review queue shows documents', async ({ page }) => {

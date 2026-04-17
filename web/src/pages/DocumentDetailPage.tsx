@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { apiGet, apiPost } from '@/lib/api';
+import { formatBytes } from '@/lib/format';
 import { useRole } from '@/hooks/use-role';
 import {
   getWorkflowActionStates,
@@ -308,7 +309,13 @@ function DocumentDetailInner({ id }: { id: string }) {
                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">File metadata</p>
                   <p><span className="font-semibold text-slate-700">Name:</span> {primaryFile.original_filename}</p>
                   <p><span className="font-semibold text-slate-700">MIME:</span> {primaryFile.mime_type}</p>
-                  <p><span className="font-semibold text-slate-700">Size:</span> {primaryFile.size_bytes} bytes</p>
+                  <p data-testid="file-size">
+                    <span className="font-semibold text-slate-700">Size:</span>{' '}
+                    {formatBytes(primaryFile.size_bytes)}
+                    <span className="text-xs text-slate-400 ml-2">
+                      ({primaryFile.size_bytes.toLocaleString()} bytes)
+                    </span>
+                  </p>
                   {primaryFile.sha256 && (
                     <p className="font-mono text-xs break-all">
                       <span className="font-semibold text-slate-700 font-sans">SHA-256:</span> {primaryFile.sha256}
