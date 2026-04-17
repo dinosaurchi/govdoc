@@ -18,3 +18,4 @@ deploy/bundle/
 .claude/
 web/dist/
 .secrets/
+web/test-results
