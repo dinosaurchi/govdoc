@@ -327,15 +327,47 @@ export function toRoleId(frontendRole: string): Role {
 }
 
 // ---------------------------------------------------------------------------
+// Status-aware helper message
+// ---------------------------------------------------------------------------
+
+export function getWorkflowStatusMessage(status: string): string {
+  switch (status) {
+    case 'closed':
+      return 'This document is closed. No further workflow actions are available.';
+    case 'out_of_scope':
+      return 'This document has been marked out of scope. No further workflow actions are available.';
+    case 'ingest_failed':
+      return 'Document ingestion failed. No further workflow actions are available.';
+    case 'analysis_failed':
+      return 'Document analysis failed. No further workflow actions are available.';
+    case 'received':
+    case 'extracted':
+      return 'This document is being processed. Workflow actions will become available after analysis.';
+    case 'analyzed':
+      return 'Analysis complete. Review and routing actions are now available.';
+    case 'routed':
+      return 'Document has been routed. A reviewer can now claim and review this document.';
+    case 'under_review':
+      return 'This document is under review. Use the actions below to progress the workflow.';
+    case 'in_consultation':
+      return 'This document is in consultation. Resolve the consultation to continue.';
+    case 'approved':
+      return 'This document has been approved. A supervisor can close it.';
+    default:
+      return '';
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Variant → button color mapping
 // ---------------------------------------------------------------------------
 
-export type ButtonVariant = 'blue' | 'emerald' | 'purple';
+export type ButtonVariant = 'blue' | 'amber' | 'red';
 
 const VARIANT_COLOR_MAP: Record<WorkflowAction['variant'], ButtonVariant> = {
   default: 'blue',
-  caution: 'purple',
-  destructive: 'emerald',
+  caution: 'amber',
+  destructive: 'red',
 };
 
 export function toButtonVariant(variant: WorkflowAction['variant']): ButtonVariant {

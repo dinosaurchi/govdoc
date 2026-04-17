@@ -15,12 +15,16 @@ import {
   ScrollText,
   Shield,
   AlertTriangle,
+  XCircle,
+  AlertCircle,
+  Info,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { apiGet, apiPost } from '@/lib/api';
 import { useRole } from '@/hooks/use-role';
 import {
   getWorkflowActionStates,
+  getWorkflowStatusMessage,
   ACTION_GROUP_LABELS,
   isTerminalStatus,
   toRoleId,
@@ -481,21 +485,26 @@ function DocumentDetailInner({ id }: { id: string }) {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Status-aware helper text */}
+              <p className="text-sm text-slate-500 leading-relaxed">
+                {getWorkflowStatusMessage(doc.status)}
+              </p>
+
               {terminal ? (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-center space-y-1">
-                  <p className="text-sm font-bold text-slate-600">
-                    Document is <span className="capitalize">{doc.status.replace(/_/g, ' ')}</span>
-                  </p>
-                  <p className="text-xs text-slate-400">No further workflow actions available.</p>
-                </div>
+                <TerminalStateCard status={doc.status} />
+              ) : visibleActions.length === 0 ? (
+                <p className="text-sm text-slate-400 italic py-4 text-center">
+                  No workflow actions are currently available for your role.
+                </p>
               ) : (
                 actionGroupKeys.map((groupKey) => {
                   const groupItems = visibleActions.filter((v) => v.action.group === groupKey);
                   if (groupItems.length === 0) return null;
 
+                  const hasAvailable = groupItems.some((v) => v.available);
                   return (
                     <div key={groupKey} className="space-y-2">
-                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                      <p className={`text-[10px] font-black uppercase tracking-widest ${hasAvailable ? 'text-slate-400' : 'text-slate-300'}`}>
                         {ACTION_GROUP_LABELS[groupKey]}
                       </p>
                       {groupItems.map(({ action, available: isAvailable, reason }) => {
@@ -513,17 +522,17 @@ function DocumentDetailInner({ id }: { id: string }) {
                                     icon={icon}
                                     onClick={() => setShowConsultInput(true)}
                                     disabled={actionLoading}
-                                    active={true}
+                                    available={true}
                                     variant={btnVariant}
                                   />
                                 ) : (
-                                  <div className="rounded-xl border border-purple-200 bg-purple-50/50 p-3 space-y-2">
+                                  <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3 space-y-2">
                                     <textarea
                                       value={consultBody}
                                       onChange={(e) => setConsultBody(e.target.value)}
                                       placeholder="Describe what you need consulted on..."
                                       rows={3}
-                                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 outline-none resize-none"
+                                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 outline-none resize-none"
                                     />
                                     <div className="flex items-center gap-2">
                                       <button
@@ -534,7 +543,7 @@ function DocumentDetailInner({ id }: { id: string }) {
                                           setConsultBody('');
                                           setShowConsultInput(false);
                                         }}
-                                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl font-bold text-sm hover:bg-purple-700 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-xl font-bold text-sm hover:bg-amber-700 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                                       >
                                         {actionLoading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
                                         Send
@@ -554,24 +563,23 @@ function DocumentDetailInner({ id }: { id: string }) {
                           }
                           // Disabled state
                           return (
-                            <div key={action.id} className="space-y-1">
+                            <DisabledActionWrapper key={action.id} reason={reason}>
                               <ActionButton
                                 label={action.label}
                                 icon={icon}
                                 onClick={() => {}}
                                 disabled={true}
-                                active={true}
+                                available={false}
                                 variant={btnVariant}
                               />
-                              {reason && <p className="text-[10px] text-slate-400 px-1">{reason}</p>}
-                            </div>
+                            </DisabledActionWrapper>
                           );
                         }
 
                         // --- Special: resolve-consultation (auto-select note) ---
                         if (action.id === 'resolve-consultation') {
                           return (
-                            <div key={action.id} className="space-y-1">
+                            <DisabledActionWrapper key={action.id} reason={!isAvailable ? reason : null}>
                               <ActionButton
                                 label={action.label}
                                 icon={icon}
@@ -583,31 +591,25 @@ function DocumentDetailInner({ id }: { id: string }) {
                                   }
                                 }}
                                 disabled={actionLoading || !isAvailable}
-                                active={true}
+                                available={isAvailable}
                                 variant={btnVariant}
                               />
-                              {!isAvailable && reason && (
-                                <p className="text-[10px] text-slate-400 px-1">{reason}</p>
-                              )}
-                            </div>
+                            </DisabledActionWrapper>
                           );
                         }
 
                         // --- Default action rendering ---
                         return (
-                          <div key={action.id} className="space-y-1">
+                          <DisabledActionWrapper key={action.id} reason={!isAvailable ? reason : null}>
                             <ActionButton
                               label={action.label}
                               icon={icon}
                               onClick={() => handleAction(action.id)}
                               disabled={actionLoading || !isAvailable}
-                              active={true}
+                              available={isAvailable}
                               variant={btnVariant}
                             />
-                            {!isAvailable && reason && (
-                              <p className="text-[10px] text-slate-400 px-1">{reason}</p>
-                            )}
-                          </div>
+                          </DisabledActionWrapper>
                         );
                       })}
                     </div>
@@ -933,33 +935,94 @@ function ActionButton({
   icon,
   onClick,
   disabled,
-  active,
+  available,
   variant = 'blue',
 }: {
   label: string;
   icon: React.ReactNode;
   onClick: () => void;
   disabled: boolean;
-  active: boolean;
-  variant?: 'blue' | 'emerald' | 'purple';
+  available: boolean;
+  variant?: 'blue' | 'amber' | 'red';
 }) {
-  if (!active) return null;
-
   const colors = {
     blue: 'bg-blue-600 hover:bg-blue-700',
-    emerald: 'bg-emerald-600 hover:bg-emerald-700',
-    purple: 'bg-purple-600 hover:bg-purple-700',
+    amber: 'bg-amber-600 hover:bg-amber-700',
+    red: 'bg-red-600 hover:bg-red-700',
   };
+
+  if (!available) {
+    return (
+      <button
+        type="button"
+        disabled
+        className={`w-full flex items-center gap-2 px-4 py-3 rounded-xl text-white font-bold text-sm opacity-40 cursor-not-allowed ${colors[variant]}`}
+      >
+        {icon}
+        <span>{label}</span>
+      </button>
+    );
+  }
 
   return (
     <button
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`w-full flex items-center gap-2 px-4 py-3 rounded-xl text-white font-bold text-sm transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${colors[variant]}`}
+      className={`w-full flex items-center gap-2 px-4 py-3 rounded-xl text-white font-bold text-sm transition-all shadow-sm hover:shadow disabled:opacity-50 disabled:cursor-not-allowed ${colors[variant]}`}
     >
       {icon}
       <span>{label}</span>
     </button>
+  );
+}
+
+function DisabledActionWrapper({ reason, children }: { reason: string | null; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1">
+      {children}
+      {reason && <p className="text-[10px] text-slate-400 px-1">{reason}</p>}
+    </div>
+  );
+}
+
+function TerminalStateCard({ status }: { status: string }) {
+  const config: Record<string, { icon: React.ReactNode; tone: string; label: string }> = {
+    closed: {
+      icon: <CheckCircle2 size={20} className="text-slate-500" />,
+      tone: 'border-slate-200 bg-slate-50',
+      label: 'Closed',
+    },
+    out_of_scope: {
+      icon: <XCircle size={20} className="text-slate-500" />,
+      tone: 'border-slate-200 bg-slate-50',
+      label: 'Out of Scope',
+    },
+    ingest_failed: {
+      icon: <AlertCircle size={20} className="text-red-500" />,
+      tone: 'border-red-200 bg-red-50/60',
+      label: 'Ingest Failed',
+    },
+    analysis_failed: {
+      icon: <AlertTriangle size={20} className="text-amber-600" />,
+      tone: 'border-amber-200 bg-amber-50/60',
+      label: 'Analysis Failed',
+    },
+  };
+
+  const c = config[status] ?? {
+    icon: <Info size={20} className="text-slate-500" />,
+    tone: 'border-slate-200 bg-slate-50',
+    label: status.replace(/_/g, ' '),
+  };
+
+  return (
+    <div className={`rounded-xl border p-4 flex items-start gap-3 ${c.tone}`}>
+      <div className="shrink-0 mt-0.5">{c.icon}</div>
+      <div className="space-y-0.5">
+        <p className="text-sm font-bold text-slate-700 capitalize">{c.label}</p>
+        <p className="text-xs text-slate-500">No further workflow actions available.</p>
+      </div>
+    </div>
   );
 }
