@@ -1,4 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+
+const INITIAL_SIDEBAR_LIMIT = 15;
+const SIDEBAR_PAGE_SIZE = 15;
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui-card';
 import { Badge } from '@/components/ui-badge';
 import {
@@ -90,6 +93,7 @@ export default function ResponsePage() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [query, setQuery] = useState('');
+  const [visibleLimit, setVisibleLimit] = useState(INITIAL_SIDEBAR_LIMIT);
 
   const fetchResponses = async () => {
     try {
@@ -181,6 +185,32 @@ export default function ResponsePage() {
     return { pendingDocs: pending.sort(byRecency), dispatchedDocs: dispatched.sort(byRecency) };
   }, [documents, query]);
 
+  // Reset sidebar window when the filter/role changes.
+  useEffect(() => {
+    setVisibleLimit(INITIAL_SIDEBAR_LIMIT);
+  }, [query, role]);
+
+  const totalSidebar = pendingDocs.length + dispatchedDocs.length;
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = loadMoreRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setVisibleLimit((prev) =>
+              Math.min(prev + SIDEBAR_PAGE_SIZE, totalSidebar),
+            );
+          }
+        }
+      },
+      { rootMargin: '100px' },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [totalSidebar]);
+
   const getSummaryFromAnalyses = (doc: ResponseDetailDoc): string => {
     const summary = doc.analyses.find((a) => a.stage === 'summarize');
     if (summary?.payload_json?.summary_points) {
@@ -195,21 +225,21 @@ export default function ResponsePage() {
   if (loadingList) return <div className="h-96 flex items-center justify-center"><Loader2 className="animate-spin text-blue-600" size={48} /></div>;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col h-[calc(100vh-8rem)] min-h-[520px]">
+      <div className="flex items-center justify-between flex-shrink-0 pb-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Response &amp; Closeout</h1>
           <p className="text-slate-500">Finalize and dispatch official administrative responses.</p>
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-6">
+      <div className="grid lg:grid-cols-3 gap-6 flex-1 min-h-0">
         {/* ----------------------------------------------------- Sidebar */}
         <aside
-          className="lg:col-span-1 lg:sticky lg:top-20 lg:self-start flex flex-col gap-3 lg:max-h-[calc(100vh-7rem)]"
+          className="lg:col-span-1 flex flex-col gap-3 min-h-0"
           data-testid="response-sidebar"
         >
-          <div className="relative">
+          <div className="relative flex-shrink-0">
             <Search
               size={14}
               className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
@@ -224,7 +254,7 @@ export default function ResponsePage() {
             />
           </div>
           <div
-            className="flex-1 overflow-y-auto pr-1 space-y-4"
+            className="flex-1 overflow-y-auto min-h-0 pr-1 space-y-4"
             data-testid="response-list"
           >
             {documents.length === 0 ? (
@@ -240,6 +270,7 @@ export default function ResponsePage() {
                   selectedId={selectedDocId}
                   onSelect={setSelectedDocId}
                   documents={pendingDocs}
+                  visibleLimit={visibleLimit}
                   emptyHint={query ? 'No pending responses match.' : 'All caught up — nothing pending.'}
                 />
                 {dispatchedDocs.length > 0 && (
@@ -249,7 +280,19 @@ export default function ResponsePage() {
                     selectedId={selectedDocId}
                     onSelect={setSelectedDocId}
                     documents={dispatchedDocs}
+                    visibleLimit={Math.max(0, visibleLimit - pendingDocs.length)}
                   />
+                )}
+                {totalSidebar > visibleLimit && (
+                  <div
+                    ref={loadMoreRef}
+                    className="py-2 text-center"
+                    data-testid="response-load-sentinel"
+                  >
+                    <span className="text-[10px] text-slate-400 inline-flex items-center gap-1">
+                      <Loader2 className="animate-spin" size={10} /> Loading more…
+                    </span>
+                  </div>
                 )}
               </>
             )}
@@ -257,14 +300,16 @@ export default function ResponsePage() {
         </aside>
 
         {selectedDoc ? (
-          <Card className="lg:col-span-2">
-            <CardHeader className="border-b border-slate-100 flex flex-row items-center justify-between">
-              <CardTitle className="text-lg">Review Official Response: {selectedDoc.title}</CardTitle>
-              <div className="flex items-center gap-2">
+          <Card className="lg:col-span-2 flex flex-col min-h-0 overflow-hidden">
+            <CardHeader className="border-b border-slate-100 flex flex-row items-center justify-between flex-shrink-0">
+              <CardTitle className="text-lg truncate pr-4">
+                Review Official Response: {selectedDoc.title}
+              </CardTitle>
+              <div className="flex items-center gap-2 flex-shrink-0">
                 <Badge variant="outline" className="font-mono">{selectedDoc.status}</Badge>
               </div>
             </CardHeader>
-            <CardContent className="p-8 space-y-6">
+            <CardContent className="p-8 space-y-6 flex-1 overflow-y-auto min-h-0">
               {loadingDetail ? (
                 <div className="min-h-[400px] flex items-center justify-center">
                   <Loader2 className="animate-spin text-blue-600" size={32} />
@@ -325,7 +370,7 @@ export default function ResponsePage() {
             </CardContent>
           </Card>
         ) : (
-          <div className="lg:col-span-2 h-[600px] bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 space-y-4">
+          <div className="lg:col-span-2 min-h-0 bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 space-y-4">
             <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-sm">
               <FileCheck size={32} />
             </div>
@@ -348,6 +393,7 @@ function ResponseGroup({
   selectedId,
   onSelect,
   emptyHint,
+  visibleLimit = Infinity,
 }: {
   label: string;
   tone: 'amber' | 'emerald';
@@ -355,11 +401,14 @@ function ResponseGroup({
   selectedId: string | null;
   onSelect: (id: string) => void;
   emptyHint?: string;
+  visibleLimit?: number;
 }) {
   const toneClass =
     tone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800';
+  const visible = documents.slice(0, Math.max(0, visibleLimit));
+  const hidden = documents.length - visible.length;
   return (
-    <section className="space-y-2">
+    <section className="space-y-2" data-testid={`response-group-${label.toLowerCase()}`}>
       <header className="flex items-center justify-between px-1">
         <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-500">
           {label}
@@ -372,7 +421,7 @@ function ResponseGroup({
         emptyHint ? <p className="text-[11px] text-slate-400 px-1">{emptyHint}</p> : null
       ) : (
         <div className="space-y-2">
-          {documents.map((doc) => (
+          {visible.map((doc) => (
             <ResponseCard
               key={doc.id}
               doc={doc}
@@ -380,6 +429,11 @@ function ResponseGroup({
               onSelect={onSelect}
             />
           ))}
+          {hidden > 0 && (
+            <p className="text-[10px] text-slate-400 px-1">
+              {hidden} more not shown
+            </p>
+          )}
         </div>
       )}
     </section>

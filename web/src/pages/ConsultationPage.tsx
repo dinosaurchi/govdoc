@@ -1,4 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+
+const INITIAL_SIDEBAR_LIMIT = 15;
+const SIDEBAR_PAGE_SIZE = 15;
 import { Card } from '@/components/ui-card';
 import { Badge } from '@/components/ui-badge';
 import {
@@ -103,6 +106,7 @@ export default function ConsultationPage() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [visibleLimit, setVisibleLimit] = useState(INITIAL_SIDEBAR_LIMIT);
 
   const currentRoleId = ROLE_ID_BY_LABEL[role];
   const canSend = canReply(role);
@@ -223,6 +227,34 @@ export default function ConsultationPage() {
     el.scrollTop = el.scrollHeight;
   }, [sortedNotes, selectedId]);
 
+  // Reset visible window when the filter/role changes so we always start at the
+  // top of the freshly-filtered list.
+  useEffect(() => {
+    setVisibleLimit(INITIAL_SIDEBAR_LIMIT);
+  }, [query, role]);
+
+  // IntersectionObserver for lazy-loading more sidebar cards.
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+  const totalThreads = activeThreads.length + resolvedThreads.length;
+  useEffect(() => {
+    const el = loadMoreRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setVisibleLimit((prev) =>
+              Math.min(prev + SIDEBAR_PAGE_SIZE, totalThreads),
+            );
+          }
+        }
+      },
+      { rootMargin: '100px' },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [totalThreads]);
+
   if (loading) {
     return (
       <div className="h-96 flex items-center justify-center">
@@ -232,21 +264,21 @@ export default function ConsultationPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col h-[calc(100vh-8rem)] min-h-[520px]">
+      <div className="flex items-center justify-between flex-shrink-0 pb-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Internal Consultation</h1>
           <p className="text-slate-500">Cross-departmental collaboration on complex cases.</p>
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-6">
+      <div className="grid lg:grid-cols-3 gap-6 flex-1 min-h-0">
         {/* ----------------------------------------------------- Sidebar */}
         <aside
-          className="lg:col-span-1 lg:sticky lg:top-20 lg:self-start flex flex-col gap-3 lg:max-h-[calc(100vh-7rem)]"
+          className="lg:col-span-1 flex flex-col gap-3 min-h-0"
           data-testid="consultation-sidebar"
         >
-          <div className="relative">
+          <div className="relative flex-shrink-0">
             <Search
               size={14}
               className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
@@ -261,7 +293,10 @@ export default function ConsultationPage() {
             />
           </div>
 
-          <div className="flex-1 overflow-y-auto pr-1 space-y-4" data-testid="consultation-list">
+          <div
+            className="flex-1 overflow-y-auto min-h-0 pr-1 space-y-4"
+            data-testid="consultation-list"
+          >
             {documents.length === 0 ? (
               <div className="p-8 text-center bg-white border border-dashed rounded-2xl text-slate-400">
                 <MessageCircle className="mx-auto mb-2 text-slate-300" size={28} />
@@ -276,6 +311,7 @@ export default function ConsultationPage() {
                   documents={activeThreads}
                   selectedId={selectedId}
                   onSelect={setSelectedId}
+                  visibleLimit={visibleLimit}
                   emptyHint={query ? 'No active threads match.' : 'No active consultations.'}
                 />
                 {resolvedThreads.length > 0 && (
@@ -286,7 +322,17 @@ export default function ConsultationPage() {
                     documents={resolvedThreads}
                     selectedId={selectedId}
                     onSelect={setSelectedId}
+                    visibleLimit={
+                      Math.max(0, visibleLimit - activeThreads.length)
+                    }
                   />
+                )}
+                {(activeThreads.length + resolvedThreads.length) > visibleLimit && (
+                  <div ref={loadMoreRef} className="py-2 text-center" data-testid="consultation-load-sentinel">
+                    <span className="text-[10px] text-slate-400 inline-flex items-center gap-1">
+                      <Loader2 className="animate-spin" size={10} /> Loading more…
+                    </span>
+                  </div>
                 )}
               </>
             )}
@@ -296,7 +342,7 @@ export default function ConsultationPage() {
         {/* ----------------------------------------------------- Thread */}
         {selectedDoc ? (
           <Card
-            className="lg:col-span-2 flex flex-col h-[calc(100vh-10rem)] min-h-[520px] overflow-hidden"
+            className="lg:col-span-2 flex flex-col min-h-0 overflow-hidden"
             data-testid="consultation-thread"
           >
             <div className="px-5 py-4 border-b border-slate-100 bg-white">
@@ -406,7 +452,7 @@ export default function ConsultationPage() {
             </div>
           </Card>
         ) : (
-          <div className="lg:col-span-2 h-[600px] bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 space-y-4">
+          <div className="lg:col-span-2 min-h-0 bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 space-y-4">
             <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-sm">
               <MessageCircle size={32} />
             </div>
@@ -430,6 +476,7 @@ function ThreadGroup({
   selectedId,
   onSelect,
   emptyHint,
+  visibleLimit = Infinity,
 }: {
   label: string;
   count: number;
@@ -438,13 +485,16 @@ function ThreadGroup({
   selectedId: string | null;
   onSelect: (id: string) => void;
   emptyHint?: string;
+  visibleLimit?: number;
 }) {
   const toneClass =
     tone === 'blue'
       ? 'bg-blue-100 text-blue-800'
       : 'bg-slate-200 text-slate-700';
+  const visible = documents.slice(0, Math.max(0, visibleLimit));
+  const hidden = documents.length - visible.length;
   return (
-    <section className="space-y-2">
+    <section className="space-y-2" data-testid={`consultation-group-${label.toLowerCase()}`}>
       <header className="flex items-center justify-between px-1">
         <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-500">
           {label}
@@ -459,7 +509,7 @@ function ThreadGroup({
         ) : null
       ) : (
         <div className="space-y-2">
-          {documents.map((doc) => (
+          {visible.map((doc) => (
             <ThreadCard
               key={doc.id}
               doc={doc}
@@ -467,6 +517,11 @@ function ThreadGroup({
               onSelect={onSelect}
             />
           ))}
+          {hidden > 0 && (
+            <p className="text-[10px] text-slate-400 px-1">
+              {hidden} more not shown
+            </p>
+          )}
         </div>
       )}
     </section>
