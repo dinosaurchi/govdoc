@@ -39,7 +39,7 @@ export interface WorkflowAction {
   /** Semantic grouping for sidebar sections. */
   group: 'analysis' | 'review' | 'consultation' | 'closeout';
   /** Visual severity hint for the consuming UI. */
-  variant: 'default' | 'caution' | 'destructive';
+  variant: 'default' | 'success' | 'caution' | 'destructive';
   /** Roles that are allowed to *see* this action at all. */
   allowedRoles: Role[];
   /** Returns true when the action can be executed right now. */
@@ -148,7 +148,7 @@ const WORKFLOW_ACTIONS: readonly WorkflowAction[] = [
     id: 'approve-routing',
     label: 'Approve routing',
     group: 'review',
-    variant: 'destructive',
+    variant: 'success',
     allowedRoles: ['reviewer', 'supervisor'],
     isAvailable: canApproveRouting,
     getDisabledReason: (doc) => {
@@ -188,7 +188,7 @@ const WORKFLOW_ACTIONS: readonly WorkflowAction[] = [
     id: 'resolve-consultation',
     label: 'Resolve consultation',
     group: 'consultation',
-    variant: 'destructive',
+    variant: 'success',
     allowedRoles: ['reviewer', 'consultant', 'supervisor'],
     isAvailable: canResolveConsultation,
     getDisabledReason: (doc) => {
@@ -232,7 +232,7 @@ const WORKFLOW_ACTIONS: readonly WorkflowAction[] = [
     id: 'close',
     label: 'Close document',
     group: 'closeout',
-    variant: 'destructive',
+    variant: 'success',
     allowedRoles: ['supervisor'],
     isAvailable: canClose,
     getDisabledReason: (doc) => {
@@ -362,10 +362,11 @@ export function getWorkflowStatusMessage(status: string): string {
 // Variant → button color mapping
 // ---------------------------------------------------------------------------
 
-export type ButtonVariant = 'blue' | 'amber' | 'red';
+export type ButtonVariant = 'blue' | 'emerald' | 'amber' | 'red';
 
 const VARIANT_COLOR_MAP: Record<WorkflowAction['variant'], ButtonVariant> = {
   default: 'blue',
+  success: 'emerald',
   caution: 'amber',
   destructive: 'red',
 };

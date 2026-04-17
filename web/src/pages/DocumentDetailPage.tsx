@@ -75,6 +75,11 @@ type ConsultationNote = {
   created_at: string;
 };
 
+type Department = {
+  id: string;
+  name: string;
+};
+
 type DocDetail = {
   id: string;
   title: string;
@@ -136,6 +141,10 @@ function DocumentDetailInner({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   const [showConsultInput, setShowConsultInput] = useState(false);
   const [consultBody, setConsultBody] = useState('');
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [showRerouteInput, setShowRerouteInput] = useState(false);
+  const [rerouteDepartmentId, setRerouteDepartmentId] = useState('');
+  const [rerouteRationale, setRerouteRationale] = useState('');
   const [analysisView, setAnalysisView] = useState<'rendered' | 'raw'>('rendered');
 
   const fetchDoc = async (opts?: { silent?: boolean }) => {
@@ -156,9 +165,13 @@ function DocumentDetailInner({ id }: { id: string }) {
     let active = true;
     (async () => {
       try {
-        const data = await apiGet<DocDetail>(`/documents/${id}`, role);
+        const [data, deptList] = await Promise.all([
+          apiGet<DocDetail>(`/documents/${id}`, role),
+          apiGet<Department[]>('/meta/departments', role),
+        ]);
         if (active) {
           setDoc(data);
+          setDepartments(deptList);
           setError(null);
         }
       } catch (err: unknown) {
@@ -201,6 +214,8 @@ function DocumentDetailInner({ id }: { id: string }) {
     }
   };
 
+  const availableDepartments = departments.filter((department) => department.id !== doc?.assigned_department_id);
+
   if (loading) {
     return (
       <div className="h-96 flex items-center justify-center">
@@ -215,6 +230,7 @@ function DocumentDetailInner({ id }: { id: string }) {
   const primaryFile = doc.files[0];
   const primaryArtifact = doc.artifacts[0];
   const hasConsultationThread = doc.consultation_notes.length > 0 || doc.status === 'in_consultation';
+  const departmentNames = Object.fromEntries(departments.map((department) => [department.id, department.name]));
   const analysesByStage: Record<string, AIAnalysis> = {};
   for (const a of doc.analyses) {
     analysesByStage[a.stage] = a;
@@ -247,6 +263,7 @@ function DocumentDetailInner({ id }: { id: string }) {
       default: return <CheckCircle2 size={16} />;
     }
   };
+  const displayDepartment = (value: string) => departmentNames[value] ?? humanizeEnum(value);
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-20 animate-in fade-in duration-500">
@@ -390,10 +407,10 @@ function DocumentDetailInner({ id }: { id: string }) {
                         {humanizeEnum(dec.decision)}
                       </Badge>
                       {dec.suggested_department_id && (
-                        <span className="text-xs text-slate-500">Suggested: {humanizeDepartment(dec.suggested_department_id)}</span>
+                        <span className="text-xs text-slate-500">Suggested: {displayDepartment(dec.suggested_department_id)}</span>
                       )}
                       {dec.final_department_id && (
-                        <span className="text-xs font-bold text-slate-800">Final: {humanizeDepartment(dec.final_department_id)}</span>
+                        <span className="text-xs font-bold text-slate-800">Final: {displayDepartment(dec.final_department_id)}</span>
                       )}
                     </div>
                     {dec.rationale && <p className="text-xs text-slate-500 italic">&quot;{dec.rationale}&quot;</p>}
@@ -510,6 +527,107 @@ function DocumentDetailInner({ id }: { id: string }) {
                       {groupItems.map(({ action, available: isAvailable, reason }) => {
                         const icon = getActionIcon(action.id);
                         const btnVariant: ButtonVariant = toButtonVariant(action.variant);
+
+                        // --- Special: reroute inline form ---
+                        if (action.id === 'reroute') {
+                          if (isAvailable) {
+                            return (
+                              <div key={action.id} className="space-y-2">
+                                {!showRerouteInput ? (
+                                  <ActionButton
+                                    label={action.label}
+                                    icon={icon}
+                                    onClick={() => {
+                                      setRerouteDepartmentId('');
+                                      setRerouteRationale('');
+                                      setShowRerouteInput(true);
+                                    }}
+                                    disabled={actionLoading}
+                                    available={true}
+                                    variant={btnVariant}
+                                  />
+                                ) : (
+                                  <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 space-y-3">
+                                    <div className="space-y-1">
+                                      <label htmlFor="reroute-department" className="text-xs font-bold text-slate-600">
+                                        Reassign department
+                                      </label>
+                                      <select
+                                        id="reroute-department"
+                                        value={rerouteDepartmentId}
+                                        onChange={(e) => setRerouteDepartmentId(e.target.value)}
+                                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                      >
+                                        <option value="">Select a department...</option>
+                                        {availableDepartments.map((department) => (
+                                          <option key={department.id} value={department.id}>
+                                            {department.name}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label htmlFor="reroute-rationale" className="text-xs font-bold text-slate-600">
+                                        Rationale
+                                      </label>
+                                      <textarea
+                                        id="reroute-rationale"
+                                        value={rerouteRationale}
+                                        onChange={(e) => setRerouteRationale(e.target.value)}
+                                        placeholder="Explain why the document should be reassigned..."
+                                        rows={3}
+                                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                                      />
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        disabled={actionLoading || !rerouteDepartmentId}
+                                        onClick={() => {
+                                          handleAction('reroute', {
+                                            department_id: rerouteDepartmentId,
+                                            rationale: rerouteRationale.trim(),
+                                          });
+                                          setRerouteDepartmentId('');
+                                          setRerouteRationale('');
+                                          setShowRerouteInput(false);
+                                        }}
+                                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                                      >
+                                        {actionLoading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
+                                        Confirm reroute
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setShowRerouteInput(false);
+                                          setRerouteDepartmentId('');
+                                          setRerouteRationale('');
+                                        }}
+                                        className="px-3 py-2 text-slate-500 hover:text-slate-700 text-sm font-medium rounded-xl hover:bg-slate-100 transition"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <DisabledActionWrapper key={action.id} reason={reason}>
+                              <ActionButton
+                                label={action.label}
+                                icon={icon}
+                                onClick={() => {}}
+                                disabled={true}
+                                available={false}
+                                variant={btnVariant}
+                              />
+                            </DisabledActionWrapper>
+                          );
+                        }
 
                         // --- Special: request-consultation inline form ---
                         if (action.id === 'request-consultation') {
@@ -926,10 +1044,6 @@ function humanizeEnum(value: unknown): string {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function humanizeDepartment(value: string): string {
-  return humanizeEnum(value);
-}
-
 function ActionButton({
   label,
   icon,
@@ -943,10 +1057,11 @@ function ActionButton({
   onClick: () => void;
   disabled: boolean;
   available: boolean;
-  variant?: 'blue' | 'amber' | 'red';
+  variant?: 'blue' | 'emerald' | 'amber' | 'red';
 }) {
   const colors = {
     blue: 'bg-blue-600 hover:bg-blue-700',
+    emerald: 'bg-emerald-600 hover:bg-emerald-700',
     amber: 'bg-amber-600 hover:bg-amber-700',
     red: 'bg-red-600 hover:bg-red-700',
   };

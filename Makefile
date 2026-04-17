@@ -20,6 +20,7 @@ build:
 
 test:
 	mkdir -p data api/data
+	npm test --prefix web
 	cd api && $(PY) -m alembic upgrade head && PYTHONPATH=. $(PY) -m pytest tests -q -m "unit or contract or mock_integration" --tb=short
 
 lint:
