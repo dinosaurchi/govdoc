@@ -12,7 +12,8 @@ venv/
 .venv/
 *.db
 .pytest_cache/
-data/
+data/*
+!data/.gitkeep
 deploy/artifacts/
 deploy/bundle/
 .claude/
