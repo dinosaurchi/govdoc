@@ -35,10 +35,11 @@ The result: faster processing, fewer routing errors, built-in audit trails, and 
 - **Automated routing** to the correct department based on AI analysis
 - **Consultation workflow** — request input from other departments with AI-drafted consultation notes
 
-### 👥 Role-Based Access
-- **4 distinct roles**: Intake Clerk, Department Reviewer, Consultant, Supervisor
-- Each role sees only the documents and actions relevant to their responsibilities
-- Full audit trail of who did what and when
+### 👥 Simulated Multi-Role Workflow
+- **4 role perspectives** for demo: Intake Clerk, Department Reviewer, Consultant, Supervisor
+- Each role showcases a tailored view of the document workflow
+- Demonstrates how different stakeholders interact with the system
+- Full audit trail shows actions attributed to each role
 
 ### 🔍 Retrieval-Augmented Generation
 - Search across the full document corpus using natural language
@@ -119,8 +120,7 @@ make up
 make seed-demo
 
 # 5. Open your browser
-# Frontend:  http://localhost:3000
-# API docs:  http://localhost:8000/docs
+#    http://localhost:3000
 ```
 
 ---
@@ -136,6 +136,7 @@ make seed-demo
 | `make lint` | Lint frontend (ESLint) and backend (Ruff) |
 | `make seed-demo` | Seed demo documents and reference corpus |
 | `make logs` | Follow service logs |
+| — | API health: `http://localhost:8000/readyz` |
 
 See **[CONTRIBUTING.md](CONTRIBUTING.md)** for detailed development guidelines.
 
@@ -189,25 +190,16 @@ govdoc/
 
 ---
 
-## Role-Based Access
+## Demo Roles
 
-| Role | Capabilities |
+> **Note:** Role switching is a demo simulation to showcase the multi-stakeholder workflow. This is not a production authentication system.
+
+| Role | Demonstrates |
 |------|-------------|
-| **Intake Clerk** | Upload documents, view basic document info, trigger AI extraction |
-| **Department Reviewer** | Review routed documents, request consultations, approve/reject |
-| **Consultant** | Respond to consultation requests from other departments |
-| **Supervisor** | Full visibility across all documents, dashboard analytics, override decisions |
-
----
-
-## API Documentation
-
-The backend API is fully self-documented via FastAPI's built-in OpenAPI support. When the services are running:
-
-- **Swagger UI**: [http://localhost:8000/docs](http://localhost:8000/docs)
-- **ReDoc**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
-
-All endpoints include request/response schemas, authentication headers, and example payloads.
+| **Intake Clerk** | Document upload, AI extraction, initial processing |
+| **Department Reviewer** | Document review, consultation requests, routing decisions |
+| **Consultant** | Responding to consultation requests |
+| **Supervisor** | Full oversight, analytics, final approval and closeout |
 
 ---
 
