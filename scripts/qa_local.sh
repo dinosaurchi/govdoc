@@ -14,9 +14,9 @@ fail() {
 }
 
 check_http() {
-  local name="$1" url="$2" expect="${3:-200}"; shift 3
+  local name="$1" url="$2" expect="${3:-200}"; shift "$(( $# >= 3 ? 3 : $# ))"
   local code
-  code="$(curl -sS -o /dev/null -w '%{http_code}' "$@" "$url" || true)"
+  code="$(curl -sS -o /dev/null -w '%{http_code}' "$url" "$@" || true)"
   if [[ "$code" != "$expect" ]]; then
     fail "$name expected HTTP $expect from $url, got $code"
   fi
