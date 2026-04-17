@@ -127,6 +127,46 @@ test.describe('GovDoc E2E — Full document workflow', () => {
   });
 
   // =========================================================================
+  // Step 3a — Intake shows processing steps + link to review case (FEEDBACK-02)
+  // =========================================================================
+  test('Step 3a: Intake shows processing steps + CTA link (FEEDBACK-02)', async ({ page }) => {
+    await page.goto('/');
+    await idle(page);
+    await switchRole(page, 'Intake Clerk');
+    await page.locator('nav').getByText('Intake', { exact: true }).click();
+    await expect(page).toHaveURL(/\/intake$/);
+    await idle(page);
+
+    await page.locator('input[type="file"]').setInputFiles(FIXTURE);
+
+    // The stepper should appear during upload
+    await expect(page.locator('[data-testid="intake-stepper"]')).toBeVisible({ timeout: 5000 });
+    // All step rows should be present
+    for (const id of ['upload', 'validate', 'extract', 'analyze']) {
+      await expect(page.locator(`[data-testid="intake-step-${id}"]`)).toBeVisible();
+    }
+
+    // Wait for success state
+    await expect(page.locator('[data-testid="intake-success"]')).toBeVisible({ timeout: 30000 });
+
+    // After success every step must be done
+    for (const id of ['upload', 'validate', 'extract', 'analyze']) {
+      await expect(page.locator(`[data-testid="intake-step-${id}"]`)).toHaveAttribute('data-status', 'done');
+    }
+
+    // CTA link to open the review case for this specific document
+    const cta = page.locator('[data-testid="intake-open-case"]');
+    await expect(cta).toBeVisible();
+    const href = await cta.getAttribute('href');
+    expect(href).toMatch(/^\/documents\/[0-9a-f-]+$/);
+
+    await cta.click();
+    await expect(page).toHaveURL(/\/documents\/[^/]+$/);
+
+    expect(consoleErrors.filter(e => e.includes('TypeError'))).toHaveLength(0);
+  });
+
+  // =========================================================================
   // Step 3b — Review queue rows are clickable (FEEDBACK-01)
   // =========================================================================
   test('Step 3b: Review queue rows are clickable (FEEDBACK-01)', async ({ page }) => {

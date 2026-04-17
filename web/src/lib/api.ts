@@ -105,6 +105,6 @@ export async function fetchApi(path: string, options: RequestInit = {}) {
 }
 
 /** Multipart upload — do not set Content-Type (browser sets boundary). */
-export async function uploadDocument(file: File, role?: string) {
-  return apiUpload('/documents/', file, role);
+export async function uploadDocument<T = unknown>(file: File, role?: string): Promise<T> {
+  return apiUpload<T>('/documents/', file, role);
 }
