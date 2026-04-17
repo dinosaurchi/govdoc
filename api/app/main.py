@@ -1,3 +1,5 @@
+import json
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -55,6 +57,25 @@ async def lifespan(_app: FastAPI):
         embed_fn=real_ai.embed,
         rerank_fn=None,
     )
+
+    # Load reference corpus if seeded (data/reference_chunks.json).
+    # Absent file → empty corpus; evidence panel degrades gracefully.
+    ref_path = _PROJECT_ROOT / "data" / "reference_chunks.json"
+    if ref_path.exists():
+        try:
+            chunks = json.loads(ref_path.read_text(encoding="utf-8"))
+            retrieval_svc.set_references(chunks)
+            print(f"retrieval: loaded {len(chunks)} reference chunks", file=sys.stderr)
+        except Exception as exc:
+            print(f"retrieval: failed to load reference chunks: {exc}", file=sys.stderr)
+            raise
+    else:
+        print(
+            "retrieval: no reference corpus found "
+            "(run scripts/seed_reference_corpus.py to populate)",
+            file=sys.stderr,
+        )
+
     _app.state.retrieval_service = retrieval_svc
 
     yield

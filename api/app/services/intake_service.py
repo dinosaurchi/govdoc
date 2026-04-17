@@ -89,6 +89,42 @@ class IntakeService:
             self.db.flush()
             raise
 
+        # ── OCR fallback for scan PDFs / images ──────────────────────
+        # If primary extraction yielded no usable text and we have an AI
+        # provider, render the file and run OCR through the provider.
+        # Fail-fast: any OCR error aborts intake (no silent empty-text fall).
+        needs_ocr = (
+            ai_provider is not None
+            and not self.extractor.has_text(result)
+            and (
+                validated_mime == "application/pdf"
+                or validated_mime.startswith("image/")
+            )
+        )
+        if needs_ocr:
+            try:
+                result = self.extractor.extract_with_ocr(
+                    full_path, validated_mime, ai_provider.ocr
+                )
+                write_audit_event(
+                    self.db,
+                    document_id=document_id,
+                    actor_role=role_id,
+                    event_type="extraction.ocr",
+                    metadata_json={"method": result.method.value, "pages": result.page_count},
+                )
+            except Exception as e:
+                document.status = DocumentStatus.ingest_failed
+                write_audit_event(
+                    self.db,
+                    document_id=document_id,
+                    actor_role=role_id,
+                    event_type="extraction.failed",
+                    metadata_json={"error": str(e)},
+                )
+                self.db.flush()
+                raise
+
         # Create artifact
         artifact = ExtractedArtifact(
             id=str(uuid.uuid4()),

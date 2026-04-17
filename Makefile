@@ -1,4 +1,4 @@
-.PHONY: install dev build lint test ci clean migrate up down logs qa check-credentials seed-demo up-remote remote-package test-ai test-e2e eval-ai qa-local
+.PHONY: install dev build lint test ci clean migrate up down logs qa check-credentials seed-corpus seed-demo up-remote remote-package test-ai test-e2e eval-ai qa-local
 
 # Prefer project venv when present (absolute path so `cd api && …` still works)
 PY := $(shell test -x "$(CURDIR)/.venv/bin/python" && echo "$(CURDIR)/.venv/bin/python" || command -v python3)
@@ -53,9 +53,13 @@ qa:
 check-credentials:
 	cd api && $(PY) -m pytest tests -q -m "creds" --creds --tb=short
 
-seed-demo:
+seed-corpus:
+	mkdir -p data
+	$(PY) scripts/seed_reference_corpus.py
+
+seed-demo: seed-corpus
 	mkdir -p data api/data
-	cd api && $(PY) -m alembic upgrade head && cd .. && $(PY) scripts/seed_demo_data.py
+	cd api && $(PY) -m alembic upgrade head && PYTHONPATH=. $(PY) ../scripts/seed_demo_data.py
 
 remote-package:
 	bash scripts/remote_package.sh

@@ -11,4 +11,5 @@ openai
 pypdf
 python-docx
 Pillow
+pdf2image
 pyyaml

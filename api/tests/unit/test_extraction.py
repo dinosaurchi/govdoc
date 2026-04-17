@@ -92,6 +92,43 @@ class TestUnsupportedMimeType:
 
 
 @pytest.mark.unit
+class TestOCRFallback:
+    """OCR fallback path: extract_with_ocr renders pages and calls ocr_fn."""
+
+    pytest.importorskip("pdf2image")
+
+    def test_pdf_ocr_fallback_concatenates_pages(self, extractor, tmp_dir):
+        from app.adapters.modelstudio.schemas import OCRResult
+
+        path = _make_blank_pdf(tmp_dir)
+        calls = {"n": 0}
+
+        def fake_ocr(image_b64: str) -> OCRResult:
+            calls["n"] += 1
+            assert isinstance(image_b64, str) and image_b64
+            return OCRResult(text="sample OCR text from page", page_count=1)
+
+        result = extractor.extract_with_ocr(path, "application/pdf", fake_ocr)
+
+        assert "sample OCR text" in result.text
+        assert result.method == ExtractionMethod.render_ocr
+        assert result.page_count >= 1
+        assert calls["n"] == result.page_count
+        assert any("pdf2image" in w for w in result.warnings)
+
+    def test_pdf_ocr_empty_text_raises(self, extractor, tmp_dir):
+        from app.adapters.modelstudio.schemas import OCRResult
+
+        path = _make_blank_pdf(tmp_dir)
+
+        def empty_ocr(_b64: str) -> OCRResult:
+            return OCRResult(text="", page_count=1)
+
+        with pytest.raises(ValueError, match="OCR produced empty text"):
+            extractor.extract_with_ocr(path, "application/pdf", empty_ocr)
+
+
+@pytest.mark.unit
 class TestExtractionResult:
     def test_default_warnings_empty(self):
         from app.services.extraction.real_extractor import ExtractionResult

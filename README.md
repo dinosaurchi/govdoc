@@ -101,3 +101,31 @@ See **`.env.example`** for the full contract. Highlights:
 ## License / data
 
 All persistent data stays under **`data/`** (gitignored). Do not commit customer or real secrets.
+
+## Demo runbook
+
+Quick checklist to prepare a clean demo environment. See
+`docs/govdoc_demo_script.md` for the live narrative and talking points.
+
+1. **Validate credentials** — `make check-credentials`
+2. **Reset DB** — `rm -f data/secureflow.db api/data/secureflow.db`
+3. **Start stack** — `make up`
+4. **Seed reference corpus + scenarios** — `make seed-demo`
+   (depends on `make seed-corpus`, which writes `data/reference_chunks.json`
+   from `data/reference-corpus/`; the API lifespan loads it on startup so
+   the evidence panel returns real hits)
+5. **Optional — pre-run live analysis on seeded scenarios** so the demo
+   is instant: `GOVDOC_SEED_LIVE=1 make seed-demo`
+
+### URL map
+
+Seeded documents are listed by `GET /api/v1/demo/scenarios`. The
+typical demo URLs are:
+
+- Hero (clean cong_van): `/documents/<hero-doc-id>`
+- Ambiguity (needs consultation): `/documents/<ambiguity-doc-id>`
+- Scan (OCR path): `/documents/<scan-doc-id>`
+- Out-of-scope: `/documents/<out-of-scope-doc-id>`
+
+Run `curl -s -H 'X-GovDoc-Role: supervisor' http://localhost:8000/api/v1/demo/scenarios`
+to fetch the current IDs after seeding.
