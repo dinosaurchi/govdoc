@@ -229,9 +229,9 @@ export default function IntakePage() {
         </div>
       )}
 
-      <div className="grid lg:grid-cols-3 gap-6">
-        <Card className="lg:col-span-2">
-          <CardContent className="p-8 space-y-6">
+      <div className="grid lg:grid-cols-3 gap-6 items-stretch">
+        <Card className="lg:col-span-2 flex flex-col">
+          <CardContent className="p-8 flex-1 flex flex-col gap-6">
             <input
               ref={inputRef}
               type="file"
@@ -247,18 +247,26 @@ export default function IntakePage() {
               type="button"
               disabled={!canIntake || loading}
               onClick={() => inputRef.current?.click()}
-              className={`w-full border-2 border-dashed rounded-2xl p-12 flex flex-col items-center justify-center space-y-4 transition-colors ${
+              className={`flex-1 min-h-[260px] w-full border-2 border-dashed rounded-2xl p-10 flex flex-col items-center justify-center gap-4 transition-colors ${
                 canIntake && !loading
                   ? 'border-slate-200 hover:border-blue-400 cursor-pointer bg-slate-50'
                   : 'border-slate-100 bg-slate-50/50 cursor-not-allowed opacity-50'
               }`}
             >
               <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center">
-                {loading ? <Loader2 className="animate-spin text-blue-600" size={32} /> : <Upload className="text-blue-600" size={32} />}
+                {loading ? (
+                  <Loader2 className="animate-spin text-blue-600" size={32} />
+                ) : (
+                  <Upload className="text-blue-600" size={32} />
+                )}
               </div>
               <div className="text-center">
-                <p className="font-bold text-lg">{loading ? 'Processing upload…' : 'Choose file to upload'}</p>
-                <p className="text-sm text-slate-500">PDF, DOC/DOCX, or plain text — validated on the server (fail-fast).</p>
+                <p className="font-bold text-lg">
+                  {loading ? 'Processing upload…' : 'Choose file to upload'}
+                </p>
+                <p className="text-sm text-slate-500">
+                  PDF, DOC/DOCX, or plain text — validated on the server (fail-fast).
+                </p>
               </div>
             </button>
 
@@ -272,22 +280,28 @@ export default function IntakePage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="flex flex-col">
           <CardHeader>
             <CardTitle className="text-base">Intake Guidelines</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4 text-sm text-slate-600">
-            <div className="space-y-2">
+          <CardContent className="space-y-4 text-sm text-slate-600 flex-1">
+            <div className="space-y-1">
               <p className="font-bold text-slate-900">1. Verify Origin</p>
               <p>Ensure the document is from an authorized sender or department.</p>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1">
               <p className="font-bold text-slate-900">2. Upload &amp; Classify</p>
-              <p>Text extraction and AI classification (doc type, urgency, department) run automatically on upload.</p>
+              <p>
+                Text extraction and AI classification (doc type, urgency, department) run
+                automatically on upload.
+              </p>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1">
               <p className="font-bold text-slate-900">3. Review AI Output</p>
-              <p>Open the Review queue to validate AI routing suggestions and take workflow actions.</p>
+              <p>
+                Open the Review queue to validate AI routing suggestions and take workflow
+                actions.
+              </p>
             </div>
           </CardContent>
         </Card>

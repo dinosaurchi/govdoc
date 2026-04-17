@@ -89,44 +89,58 @@ export default function DashboardPage() {
 
       <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((stat) => (
-          <Card key={stat.label}>
-            <CardContent className="p-6">
+          <Card key={stat.label} className="h-full">
+            <CardContent className="p-5 flex flex-col h-full gap-4">
               <div className="flex items-center justify-between">
-                <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center">
+                <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center shrink-0">
                   {stat.icon}
                 </div>
-                <span className={`text-xs font-bold ${stat.trend.startsWith('+') ? 'text-emerald-600' : 'text-red-600'}`}>
+                <span
+                  className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                    stat.trend.startsWith('+')
+                      ? 'bg-emerald-50 text-emerald-700'
+                      : 'bg-red-50 text-red-700'
+                  }`}
+                >
                   {stat.trend}
                 </span>
               </div>
-              <div className="mt-4">
-                <p className="text-sm font-bold text-slate-400 uppercase tracking-wider">{stat.label}</p>
-                <p className="text-2xl font-black text-slate-900">{stat.value}</p>
+              <div className="mt-auto">
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider leading-snug min-h-[1.25rem]">
+                  {stat.label}
+                </p>
+                <p className="text-2xl font-black text-slate-900 leading-none mt-1">
+                  {stat.value}
+                </p>
               </div>
             </CardContent>
           </Card>
         ))}
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-6">
-        <Card>
+      <div className="grid lg:grid-cols-2 gap-6 items-stretch">
+        <Card className="flex flex-col">
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <BarChart3 size={18} /> Processing Volume by Workflow Stage
             </CardTitle>
           </CardHeader>
-          <CardContent className="m-6 rounded-xl border border-slate-200 bg-slate-50/60 p-6">
-            <StatusBars data={statusChart} />
+          <CardContent className="flex-1 px-6 pb-6">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-6 h-full">
+              <StatusBars data={statusChart} />
+            </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="flex flex-col">
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <PieChart size={18} /> Departmental Distribution
             </CardTitle>
           </CardHeader>
-          <CardContent className="m-6 rounded-xl border border-slate-200 bg-slate-50/60 p-6">
-            <DepartmentDonut data={departmentChart} />
+          <CardContent className="flex-1 px-6 pb-6">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-6 h-full">
+              <DepartmentDonut data={departmentChart} />
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -175,13 +189,18 @@ function StatusBars({ data }: { data: ChartDatum[] }) {
       {data.map((item) => (
         <div key={item.label} className="space-y-1.5">
           <div className="flex items-center justify-between text-sm">
-            <span className="font-semibold text-slate-700">{item.label}</span>
-            <span className="font-mono text-slate-500">{item.value}</span>
+            <span className="font-semibold text-slate-700 truncate">{item.label}</span>
+            <span className="font-mono text-slate-500 tabular-nums shrink-0 pl-2">
+              {item.value}
+            </span>
           </div>
-          <div className="h-3 rounded-full bg-white shadow-inner">
+          <div className="h-3 rounded-full bg-white shadow-inner overflow-hidden">
             <div
               className="h-3 rounded-full transition-all"
-              style={{ width: `${(item.value / maxValue) * 100}%`, backgroundColor: item.color }}
+              style={{
+                width: `${(item.value / maxValue) * 100}%`,
+                backgroundColor: item.color,
+              }}
             />
           </div>
         </div>
@@ -199,24 +218,37 @@ function DepartmentDonut({ data }: { data: ChartDatum[] }) {
   const gradient = buildConicGradient(data, total);
 
   return (
-    <div className="flex h-52 items-center gap-6">
-      <div className="relative flex h-36 w-36 shrink-0 items-center justify-center rounded-full" style={{ background: gradient }}>
+    <div className="flex min-h-[13rem] h-full items-center gap-6">
+      <div
+        className="relative flex h-36 w-36 shrink-0 items-center justify-center rounded-full"
+        style={{ background: gradient }}
+      >
         <div className="flex h-20 w-20 items-center justify-center rounded-full bg-white text-center shadow-sm">
-          <div>
+          <div className="leading-tight">
             <div className="text-2xl font-black text-slate-900">{total}</div>
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Docs</div>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Docs
+            </div>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 space-y-3">
+      <div className="flex-1 space-y-3 min-w-0">
         {data.map((item) => (
-          <div key={item.label} className="flex items-center justify-between gap-3 text-sm">
-            <div className="flex items-center gap-2">
-              <span className="h-3 w-3 rounded-full" style={{ backgroundColor: item.color }} />
-              <span className="font-semibold text-slate-700">{item.label}</span>
+          <div
+            key={item.label}
+            className="flex items-center justify-between gap-3 text-sm min-w-0"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <span
+                className="h-3 w-3 rounded-full shrink-0"
+                style={{ backgroundColor: item.color }}
+              />
+              <span className="font-semibold text-slate-700 truncate">{item.label}</span>
             </div>
-            <span className="font-mono text-slate-500">{item.value}</span>
+            <span className="font-mono text-slate-500 tabular-nums shrink-0 w-10 text-right">
+              {item.value}
+            </span>
           </div>
         ))}
       </div>
