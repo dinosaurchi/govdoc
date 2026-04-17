@@ -1,0 +1,15 @@
+{
+  "name": "govdoc-secureflow-root",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run dev --prefix web\" \"cd api && uvicorn app.main:app --reload --port 8000\"",
+    "build": "npm run build --prefix web",
+    "start": "concurrently \"npm run start --prefix web\" \"cd api && uvicorn app.main:app --port 8000\"",
+    "lint": "npm run lint --prefix web",
+    "clean": "npm run clean --prefix web"
+  },
+  "dependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

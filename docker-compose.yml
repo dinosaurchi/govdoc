@@ -1,0 +1,22 @@
+services:
+  web:
+    build:
+      context: ./web
+      dockerfile: ../deploy/Dockerfile.web
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://api:8000
+    depends_on:
+      - api
+
+  api:
+    build:
+      context: ./api
+      dockerfile: ../deploy/Dockerfile.api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./data/secureflow.db
+    volumes:
+      - ./data:/app/data
