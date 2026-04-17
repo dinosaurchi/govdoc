@@ -1,10 +1,12 @@
+"""Seed and demo data services."""
+
 import hashlib
 from pathlib import Path
 from typing import List
 
 from sqlalchemy.orm import Session
 
-from app.repositories import system as sys_repo
+from app.models.system import Role, Department, DemoScenario
 from app.models.document import (
     AIAnalysis,
     AnalysisStage,
@@ -19,6 +21,71 @@ from app.models.document import (
     Urgency,
 )
 from app.core.config import settings
+from app.core.config_loader import load_roles_config
+
+# Resolve paths relative to the project root regardless of CWD
+# demo.py is at: api/app/services/demo.py  → 3 parents up = api/ , 4 = project root
+_API_ROOT = Path(__file__).resolve().parent.parent.parent  # api/
+_PROJECT_ROOT = _API_ROOT.parent  # govdoc/
+
+
+# ---------------------------------------------------------------------------
+# Default departments
+# ---------------------------------------------------------------------------
+
+DEFAULT_DEPARTMENTS = [
+    {"id": "phong_hanh_chinh", "name": "Phòng Hành chính", "description": "Administrative affairs"},
+    {"id": "phong_ke_hoach", "name": "Phòng Kế hoạch", "description": "Planning department"},
+    {"id": "phong_tai_chinh", "name": "Phòng Tài chính", "description": "Finance department"},
+    {"id": "phong_phap_che", "name": "Phòng Pháp chế", "description": "Legal department"},
+    {"id": "phong_ke_hoach_dau_tu", "name": "Phòng Kế hoạch Đầu tư", "description": "Investment planning"},
+]
+
+
+# ---------------------------------------------------------------------------
+# Seed functions
+# ---------------------------------------------------------------------------
+
+
+def seed_roles(db: Session):
+    """Seed roles from roles.yaml config."""
+    config_path = _PROJECT_ROOT / settings.ROLES_CONFIG_PATH
+    config = load_roles_config(config_path)
+    for role_id, role_data in config["roles"].items():
+        existing = db.query(Role).filter_by(id=role_id).first()
+        if not existing:
+            role = Role(
+                id=role_id,
+                label=role_data["label"],
+                allowed_actions=role_data.get("allowed_actions", []),
+            )
+            db.add(role)
+    db.commit()
+
+
+def seed_departments(db: Session):
+    """Seed departments from default list."""
+    for dept_data in DEFAULT_DEPARTMENTS:
+        existing = db.query(Department).filter_by(id=dept_data["id"]).first()
+        if not existing:
+            dept = Department(
+                id=dept_data["id"],
+                name=dept_data["name"],
+                description=dept_data.get("description"),
+            )
+            db.add(dept)
+    db.commit()
+
+
+def seed_all(db: Session):
+    """Seed all base data: roles and departments."""
+    seed_roles(db)
+    seed_departments(db)
+
+
+# ---------------------------------------------------------------------------
+# DemoService — for demo scenarios endpoint
+# ---------------------------------------------------------------------------
 
 
 class DemoService:
@@ -26,62 +93,8 @@ class DemoService:
         self.db = db
 
     async def seed_baseline(self):
-        roles = [
-            {
-                "id": "intake_clerk",
-                "label": "Intake Clerk",
-                "allowed_actions": [
-                    "documents.create",
-                    "documents.read",
-                    "documents.list",
-                ],
-            },
-            {
-                "id": "reviewer",
-                "label": "Department Reviewer",
-                "allowed_actions": [
-                    "documents.read",
-                    "documents.list",
-                    "documents.review",
-                ],
-            },
-            {
-                "id": "consultant",
-                "label": "Consultant",
-                "allowed_actions": [
-                    "documents.read",
-                    "consultation.create",
-                    "consultation.complete",
-                ],
-            },
-            {
-                "id": "supervisor",
-                "label": "Supervisor",
-                "allowed_actions": [
-                    "documents.read",
-                    "documents.list",
-                    "documents.escalate",
-                    "documents.close",
-                    "demo.reset",
-                ],
-            },
-        ]
-        for r_info in roles:
-            existing = sys_repo.role.get(self.db, id=r_info["id"])
-            if not existing:
-                sys_repo.role.create(self.db, obj_in=r_info)
-
-        depts = [
-            {"name": "Văn phòng Bộ", "description": "Office of the Ministry"},
-            {"name": "Vụ Kế hoạch - Tài chính", "description": "Planning & Finance Department"},
-            {"name": "Vụ Khoa học và Công nghệ", "description": "Science & Technology Department"},
-            {"name": "Vụ Pháp chế", "description": "Legal Affairs Department"},
-            {"name": "Cục Công nghiệp", "description": "Industry Bureau"},
-        ]
-        for d_info in depts:
-            existing = sys_repo.department.get_multi(self.db, limit=100)
-            if not any(d.name == d_info["name"] for d in existing):
-                sys_repo.department.create(self.db, obj_in=d_info)
+        """Seed roles and departments on startup."""
+        seed_all(self.db)
 
     def _attach_placeholder_file_and_artifact(self, doc: Document) -> None:
         root = Path(settings.LOCAL_FILE_STORAGE_ROOT)

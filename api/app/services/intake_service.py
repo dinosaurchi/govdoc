@@ -9,7 +9,6 @@ from typing import Any
 from fastapi import HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
-from app.api.role_util import get_role_id_by_name
 from app.core.config import settings
 from app.models.document import (
     Document,
@@ -34,7 +33,7 @@ async def process_document_upload(
     *,
     upload: UploadFile,
     title: str | None,
-    role_name: str,
+    role_id: str,
     extractor: ExtractionProviderInterface,
 ) -> Document:
     if not upload.filename:
@@ -56,8 +55,6 @@ async def process_document_upload(
             status_code=400,
             detail=f"Unsupported MIME type: {mime}. Allowed: {settings.ALLOWED_UPLOAD_MIME_TYPES}",
         )
-
-    actor_id = get_role_id_by_name(db, role_name)
 
     doc_title = (title or "").strip() or _safe_filename(upload.filename)
     doc = Document(
@@ -105,7 +102,7 @@ async def process_document_upload(
     write_audit_event(
         db,
         document_id=doc.id,
-        actor_role=actor_id,
+        actor_role=role_id,
         event_type="INTAKE_UPLOAD",
         metadata_json={
             "original_filename": safe_name,
@@ -116,5 +113,6 @@ async def process_document_upload(
         },
     )
 
+    db.commit()
     db.refresh(doc)
     return doc

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.api import deps
-from app.api.role_util import get_role_id_by_name
+from app.api.deps import CurrentRole
 from app.models.document import AIAnalysis, AnalysisStage, AnalysisSource, DocumentStatus
 from app.repositories import document as doc_repo
 from app.schemas.document import DocumentCreate, DocumentOut
@@ -24,24 +24,24 @@ def get_documents(db: Session = Depends(deps.get_db)):
 async def create_document(
     obj_in: DocumentCreate,
     db: Session = Depends(deps.get_db),
-    role: str = Depends(deps.get_current_role),
+    role: CurrentRole = Depends(deps.get_current_role),
 ):
-    actor_id = get_role_id_by_name(db, role)
     doc = doc_repo.document.create(db, obj_in=obj_in)
     write_audit_event(
         db,
         document_id=doc.id,
-        actor_role=actor_id,
+        actor_role=role.id,
         event_type="DOCUMENT_CREATE_JSON",
         metadata_json={"title": doc.title},
     )
+    db.commit()
     return doc_repo.document.get_with_relations(db, id=doc.id)
 
 
 @router.post("/upload", response_model=DocumentOut)
 async def upload_document(
     db: Session = Depends(deps.get_db),
-    role: str = Depends(deps.get_current_role),
+    role: CurrentRole = Depends(deps.get_current_role),
     extractor: ExtractionProviderInterface = Depends(deps.get_extraction_provider),
     file: UploadFile = File(...),
     title: Optional[str] = Form(None),
@@ -50,7 +50,7 @@ async def upload_document(
         db,
         upload=file,
         title=title,
-        role_name=role,
+        role_id=role.id,
         extractor=extractor,
     )
     return doc_repo.document.get_with_relations(db, id=doc.id)
@@ -69,7 +69,7 @@ async def analyze_document(
     doc_id: str,
     db: Session = Depends(deps.get_db),
     ai: AIProviderInterface = Depends(deps.get_ai_provider),
-    role: str = Depends(deps.get_current_role),
+    role: CurrentRole = Depends(deps.get_current_role),
 ):
     doc = doc_repo.document.get_with_relations(db, id=doc_id)
     if not doc:
@@ -83,8 +83,6 @@ async def analyze_document(
 
     analysis_data = await ai.analyze_document("Mock context for doc")
 
-    actor_id = get_role_id_by_name(db, role)
-
     analysis_obj = AIAnalysis(
         document_id=doc.id,
         stage=AnalysisStage.classify,
@@ -97,17 +95,18 @@ async def analyze_document(
 
     doc.status = DocumentStatus.analyzed
     db.add(doc)
-    db.commit()
-    db.refresh(doc)
 
     write_audit_event(
         db,
         document_id=doc.id,
-        actor_role=actor_id,
+        actor_role=role.id,
         event_type="ANALYZE",
         metadata_json={
             "analysis_source": analysis_obj.model_name,
         },
     )
+
+    db.commit()
+    db.refresh(doc)
 
     return doc_repo.document.get_with_relations(db, id=doc_id)

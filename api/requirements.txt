@@ -6,6 +6,7 @@ pydantic-settings
 python-multipart
 alembic
 pytest
+pytest-asyncio
 httpx
 ruff
 openai

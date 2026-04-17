@@ -1,15 +1,18 @@
-from fastapi import HTTPException
-from sqlalchemy.orm import Session
+"""Role utility helpers."""
 
-from app.models.system import Role
+from app.api.deps import _load_roles, CurrentRole
 
 
-def get_role_id_by_name(db: Session, label: str) -> str:
-    """Look up a Role by its label (e.g. 'Intake Clerk') and return its string PK id."""
-    role = db.query(Role).filter(Role.label == label).first()
-    if not role:
-        raise HTTPException(
-            status_code=500,
-            detail="Role registry not seeded; call POST /api/v1/demo/seed first",
-        )
-    return role.id
+def get_all_roles() -> list[dict]:
+    """Get all available roles from the loaded config."""
+    roles = _load_roles()
+    return [{"id": r.id, "label": r.label, "allowed_actions": r.allowed_actions} for r in roles.values()]
+
+
+def get_role_id_by_label(label: str) -> str | None:
+    """Look up a Role by its label and return its string PK id."""
+    roles = _load_roles()
+    for r in roles.values():
+        if r.label == label:
+            return r.id
+    return None

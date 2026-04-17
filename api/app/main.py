@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,18 +7,33 @@ from sqlalchemy import text
 
 from app.api.v1 import api_router
 from app.core.config import settings
+from app.core.config_loader import load_prompt_versions_config
 from app.db.session import SessionLocal
-from app.services.demo import DemoService
+from app.services.demo import seed_all
+from app.services.prompt_registry import PromptRegistry
+
+# Resolve paths relative to the project root regardless of CWD
+# main.py is at: api/app/main.py  → 2 parents up = api/ , 3 = project root
+_API_ROOT = Path(__file__).resolve().parent.parent  # api/
+_PROJECT_ROOT = _API_ROOT.parent  # govdoc/
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # Startup — seed roles/departments and register prompt versions
     db = SessionLocal()
     try:
-        await DemoService(db).seed_baseline()
+        seed_all(db)
+        prompt_versions_path = _PROJECT_ROOT / "api/config/prompt_versions.yaml"
+        prompts_dir = _PROJECT_ROOT / settings.PROMPT_CONFIG_PATH
+        labels = load_prompt_versions_config(prompt_versions_path)
+        registry = PromptRegistry(prompts_dir, db, labels)
+        registry.register_all()
+        _app.state.prompt_registry = registry
     finally:
         db.close()
     yield
+    # Shutdown (nothing to do)
 
 
 app = FastAPI(

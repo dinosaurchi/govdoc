@@ -1,3 +1,5 @@
+"""Workflow state machine with strict transition guards per §3.4."""
+
 from typing import Any
 
 from app.repositories import document as doc_repo
@@ -8,52 +10,79 @@ from fastapi import HTTPException
 from app.services.audit_service import write_audit_event
 
 
+# ---------------------------------------------------------------------------
+# State Machine: strict transition guards
+# ---------------------------------------------------------------------------
+
+
+class InvalidTransitionError(Exception):
+    def __init__(self, current: str, target: str):
+        self.current = current
+        self.target = target
+        super().__init__(f"Invalid transition: {current} -> {target}")
+
+
+# Valid transitions map
+VALID_TRANSITIONS: dict[DocumentStatus, set[DocumentStatus]] = {
+    DocumentStatus.received: {DocumentStatus.extracted, DocumentStatus.ingest_failed},
+    DocumentStatus.extracted: {DocumentStatus.analyzed, DocumentStatus.analysis_failed},
+    DocumentStatus.analyzed: {DocumentStatus.routed},
+    DocumentStatus.routed: {DocumentStatus.under_review, DocumentStatus.out_of_scope},
+    DocumentStatus.under_review: {
+        DocumentStatus.in_consultation,
+        DocumentStatus.routed,  # can go back to routed if rerouted
+        DocumentStatus.out_of_scope,
+    },
+    DocumentStatus.in_consultation: {
+        DocumentStatus.under_review,  # consultation resolved
+        DocumentStatus.out_of_scope,
+    },
+    DocumentStatus.approved: {DocumentStatus.closed},
+    # Terminal states and error states have no outgoing transitions
+    DocumentStatus.closed: set(),
+    DocumentStatus.out_of_scope: set(),
+    DocumentStatus.ingest_failed: set(),
+    DocumentStatus.analysis_failed: set(),
+}
+
+
+def validate_transition(current: DocumentStatus, target: DocumentStatus) -> None:
+    """Raise InvalidTransitionError if transition is not allowed."""
+    if current == target:
+        return  # same state is always OK (idempotent)
+    allowed = VALID_TRANSITIONS.get(current, set())
+    if target not in allowed:
+        raise InvalidTransitionError(current.value, target.value)
+
+
+# ---------------------------------------------------------------------------
+# WorkflowService — thin wrapper that uses validate_transition internally
+# ---------------------------------------------------------------------------
+
+
 class WorkflowService:
     def __init__(self, db: Session):
         self.db = db
 
     def ensure_transition_allowed(self, current_status: DocumentStatus, next_status: DocumentStatus) -> None:
         """Public guard for endpoints that mutate state alongside other persistence."""
-        self._validate_transition(current_status, next_status)
-
-    def _validate_transition(self, current_status: DocumentStatus, next_status: DocumentStatus):
-        allowed_transitions = {
-            DocumentStatus.received: [
-                DocumentStatus.extracted,
-                DocumentStatus.ingest_failed,
-            ],
-            DocumentStatus.extracted: [
-                DocumentStatus.analyzed,
-                DocumentStatus.ingest_failed,
-            ],
-            DocumentStatus.analyzed: [
-                DocumentStatus.routed,
-                DocumentStatus.analysis_failed,
-            ],
-            DocumentStatus.routed: [
-                DocumentStatus.under_review,
-                DocumentStatus.out_of_scope,
-            ],
-            DocumentStatus.under_review: [
-                DocumentStatus.in_consultation,
-                DocumentStatus.approved,
-            ],
-            DocumentStatus.in_consultation: [
-                DocumentStatus.under_review,
-                DocumentStatus.approved,
-            ],
-            DocumentStatus.approved: [DocumentStatus.closed],
-            DocumentStatus.closed: [],
-            DocumentStatus.out_of_scope: [],
-            DocumentStatus.ingest_failed: [],
-            DocumentStatus.analysis_failed: [],
-        }
-
-        if next_status not in allowed_transitions.get(current_status, []):
+        try:
+            validate_transition(current_status, next_status)
+        except InvalidTransitionError as exc:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid state transition from {current_status.value} to {next_status.value}",
-            )
+                detail=f"Invalid state transition from {exc.current} to {exc.target}",
+            ) from exc
+
+    def _validate_transition(self, current_status: DocumentStatus, next_status: DocumentStatus):
+        """Validate using the central state machine, raising HTTPException on failure."""
+        try:
+            validate_transition(current_status, next_status)
+        except InvalidTransitionError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid state transition from {exc.current} to {exc.target}",
+            ) from exc
 
     async def transition_state(
         self,
@@ -73,8 +102,6 @@ class WorkflowService:
 
         doc.status = next_status
         self.db.add(doc)
-        self.db.commit()
-        self.db.refresh(doc)
 
         meta: dict[str, Any] = {"old_status": old_status.value, "new_status": next_status.value}
         if metadata_json:
@@ -89,6 +116,8 @@ class WorkflowService:
             to_state=next_status.value,
             metadata_json=meta,
         )
+        self.db.commit()
+        self.db.refresh(doc)
         return doc
 
     async def add_consultation(self, document_id: str, author_role: str, body: str):
