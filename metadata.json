@@ -1,6 +1,16 @@
 {
   "name": "GovDoc SecureFlow",
   "description": "Public-sector document intake and triage system with AI-powered analysis and secure workflow management.",
+  "version": "0.1.0",
   "requestFramePermissions": [],
-  "majorCapabilities": []
+  "majorCapabilities": [
+    "AI Document Analysis",
+    "Intelligent Document Routing",
+    "Multi-Role Workflow Engine",
+    "RAG-Based Document Retrieval",
+    "Role-Based Access Control",
+    "Audit Trail",
+    "Consultation Workflow",
+    "Dashboard Analytics"
+  ]
 }

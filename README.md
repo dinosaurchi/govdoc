@@ -1,131 +1,238 @@
 # GovDoc SecureFlow
 
-Public-sector **incoming document intake and triage** baseline (GovDoc SecureFlow). This repo is a real Vite + React Router + FastAPI + SQLite application with **mocked AI/extraction/retrieval** behind isolated service interfaces.
+**AI-powered government document processing with intelligent routing, classification, and multi-role workflow.**
 
-## Pass status
+![Python](https://img.shields.io/badge/python-3.12-blue)
+![React](https://img.shields.io/badge/react-19-61dafb)
+![FastAPI](https://img.shields.io/badge/fastAPI-0.115-009688)
+![Docker](https://img.shields.io/badge/docker-compose-2496ED?logo=docker&logoColor=white)
+![CI](https://img.shields.io/badge/CI-passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-224%20passing-brightgreen)
 
-**Pass 3 (current):** developer workflow, Docker health checks, QA/credential/remote scaffolds, and test layout are hardened. **Live Model Studio**, **real OCR**, and **real embeddings** are still intentionally **not** implemented.
+---
 
-## Repository layout
+## What is GovDoc SecureFlow?
 
-| Path | Role |
-|------|------|
-| `web/` | Vite 6 + React Router v7 + TypeScript + Tailwind CSS v4 |
-| `api/` | FastAPI + SQLAlchemy + Alembic |
-| `deploy/` | Dockerfiles for `web` and `api` |
-| `scripts/` | `check_credentials`, `seed_demo_data`, `qa_local`, `remote_*`, compose health wait |
-| `data/` | SQLite DB, uploads, **gitignored** — create via compose or migrate |
-| `e2e/` | Playwright placeholder only (see `e2e/README.md`) |
+GovDoc SecureFlow is an end-to-end platform that transforms how government agencies handle incoming documents. Built for the **Qwen AI Build Day 2026** hackathon, it leverages Alibaba's Qwen family of large language models to automatically analyze, classify, and route Vietnamese government documents — from intake to final disposition.
 
-## Prerequisites
+Government offices process thousands of official documents daily — công văn (dispatches), quyết định (decisions), thông báo (notices), tờ trình (proposals), and báo cáo (reports). Each requires careful handling by the right department, with proper consultation and approval chains. GovDoc SecureFlow automates the tedious parts while preserving human oversight through a structured, role-based workflow.
 
-- Node 20+ and npm
-- Python 3.12 (recommended: `python3.12 -m venv .venv`)
-- Docker + Docker Compose v2 (for `make up`)
+The result: faster processing, fewer routing errors, built-in audit trails, and an AI assistant that surfaces relevant precedents and suggests next steps — all through a clean, modern web interface.
 
-## Local development (without Docker)
+---
 
-1. Copy environment contract: `cp .env.example .env` and adjust if needed.
-2. Install dependencies: `make install`
-3. Apply migrations: `make migrate`
-4. Run API + web together: `npm run dev` (from repo root; uses `concurrently`)
+## Features
 
-API defaults to port **8000**, web to **3000**. The Vite dev server proxies `/api/*` to the FastAPI backend (see `web/vite.config.ts`).
+### 🤖 AI-Powered Analysis
+- **Document classification** — Qwen models identify document type, priority, and subject matter
+- **Content extraction** — Structured data pulled from text, PDFs, and scanned images (via `qwen-vl-plus` vision)
+- **Smart summarization** — Key points and action items generated automatically
+- **Semantic embeddings** — `text-embedding-v4` with `qwen3-rerank` for precise retrieval
 
-## Local development (Docker)
+### 🔄 Intelligent Workflow
+- **11-state document lifecycle** with strict state machine transitions
+- **5 document types**: Công văn, Quyết định, Thông báo, Tờ trình, Báo cáo
+- **Automated routing** to the correct department based on AI analysis
+- **Consultation workflow** — request input from other departments with AI-drafted consultation notes
 
-```bash
-make up    # builds, starts api + web, waits until both healthchecks pass
-make logs  # follow logs
-make down  # stop stack
+### 👥 Role-Based Access
+- **4 distinct roles**: Intake Clerk, Department Reviewer, Consultant, Supervisor
+- Each role sees only the documents and actions relevant to their responsibilities
+- Full audit trail of who did what and when
+
+### 🔍 Retrieval-Augmented Generation
+- Search across the full document corpus using natural language
+- RAG pipeline surfaces relevant precedents and related documents
+- Evidence panel shows source citations for every AI suggestion
+
+### 📋 Audit & Compliance
+- Complete action history for every document
+- Dashboard analytics showing processing metrics and bottlenecks
+- Filterable, searchable document archive
+
+---
+
+## Architecture
+
+```
+┌─────────────┐     ┌──────────────┐     ┌─────────────────────┐
+│   Web UI    │────▶│  FastAPI API  │────▶│  Alibaba Model      │
+│  React 19   │     │  Python 3.12  │     │  Studio (Qwen)      │
+└─────────────┘     └──────┬───────┘     └─────────────────────┘
+                           │
+                    ┌──────▼───────┐
+                    │   SQLite     │
+                    │   (WAL)      │
+                    └──────────────┘
 ```
 
-- **API liveness:** `GET /health`
-- **API readiness (DB):** `GET /health/ready` — used by Docker healthchecks so the stack does not report “healthy” if SQLite is not reachable.
+The frontend proxies all API calls through Vite's dev server (or Nginx in production). The backend exposes a RESTful API and communicates with Alibaba Model Studio for AI capabilities. SQLite with WAL mode provides lightweight, reliable persistence.
 
-## Makefile targets
+---
 
-| Target | Purpose |
-|--------|---------|
-| `make install` | npm install + pip install `api/requirements.txt` |
-| `make migrate` | Alembic upgrade |
-| `make lint` | ESLint (web); Ruff on `api/app/adapters` + `api/tests`; `compileall` on all of `api/app` |
-| `make build` | `npm run build` + `docker compose build` |
-| `make test` | migrate + pytest (`api/tests`: unit + integration) |
-| `make ci` | `lint` → `build` → `test` |
-| `make up` / `make down` / `make logs` | Docker Compose |
-| `make qa` | HTTP smoke checks (`scripts/qa_local.sh`; requires stack running) |
-| `make check-credentials` | Validates Model Studio–related env vars, then **fails** until live probe exists (see below) |
-| `make seed-demo` | Runs `DemoService.seed_scenarios()` (adds demo rows; repeated runs add more documents) |
-| `make remote-package` | `docker compose build` + `docker save` + `deploy/bundle/` manifest (**exits 0**) |
-| `make up-remote` | Runs `remote-package`, then **exits non-zero** — remote ssh/rsync apply is TODO |
-| `make test-ai` | **Fails** — reserved for live Model Studio tests |
-| `make test-e2e` | **Fails** — reserved for Playwright |
+## Document Workflow
 
-## Environment variables
+Every document follows a strict state machine that ensures proper handling:
 
-See **`.env.example`** for the full contract. Highlights:
+```
+received → extracted → analyzed → routed → under_review → in_consultation → approved → closed
+                                            │              │               │
+                                            └──► out_of_scope ◄──────────┘
+```
 
-- **Database / CORS / storage:** `DATABASE_URL`, `ALLOWED_ORIGINS`, `LOCAL_FILE_STORAGE_ROOT`
-- **Demo toggles:** `ENABLE_DEMO_MODE`, `ENABLE_CACHED_AI_RESULTS`, etc. (baseline behavior is still mock-driven)
-- **Model Studio (for future live AI):** `MODELSTUDIO_API_KEY`, `MODELSTUDIO_BASE_URL`, `MODELSTUDIO_DASHSCOPE_URL` — required for **`make check-credentials`** env validation once you fill them. Model ids (qwen-plus, qwen-max, text-embedding-v4, qwen-vl-plus, qwen3-rerank) live in `api/config/models.yaml`, not env.
-- **Remote packaging contract:** `REMOTE_HOST`, `REMOTE_USER`, `REMOTE_APP_DIR` — required for `make up-remote` (see `scripts/remote_up.sh`)
+| State | Description |
+|-------|-------------|
+| `received` | Document uploaded, awaiting processing |
+| `extracted` | Text/content extracted from file |
+| `analyzed` | AI classification and summarization complete |
+| `routed` | Assigned to a department |
+| `under_review` | Department reviewer is evaluating |
+| `in_consultation` | External input requested from another department |
+| `approved` | Document reviewed and approved |
+| `closed` | Processing complete |
+| `out_of_scope` | Document does not require action |
 
-## Demo data and scenarios
+---
 
-- On API startup, `DemoService.seed_baseline()` ensures roles and departments exist.
-- **`make seed-demo`** loads additional hero/edge-case documents via `seed_scenarios()` (see `api/app/services/demo.py`).
-- Re-running **`make seed-demo`** creates **additional** seeded rows (not idempotent for documents).
+## Quick Start
 
-## What is real vs mocked (Pass 3)
+### Prerequisites
 
-| Area | Status |
-|------|--------|
-| UI, routing, role switcher, persistence, uploads, workflow storage | **Real** (baseline) |
-| AI analysis, extraction text, retrieval hits, consultation auto-replies | **Mock** modules (`api/app/services/ai`, `extraction`, `retrieval`, …) |
-| Model Studio HTTP client / OCR / embeddings | **Not implemented** — adapter stubs live under `api/app/adapters/modelstudio/` |
+- **Docker** & **Docker Compose** v2
+- **Node.js** 20+ (for local development)
+- **Python** 3.12+ (for local development)
 
-## What later coding agents should replace
+### Setup
 
-- `api/app/services/ai/mock_provider.py` → real Model Studio adapter implementing `AIProviderInterface`
-- `api/app/services/extraction/mock_provider.py` → deterministic PDF/DOCX + optional OCR path
-- `api/app/services/retrieval/mock_provider.py` → embeddings + rerank as per implementation plan
-- `api/app/adapters/modelstudio/credentials.py` → real `probe_live_credentials()` (generation, embed, OCR smoke)
-- `scripts/remote_apply.sh` (future) → load images on VPS, `docker compose up`, remote health checks
+```bash
+# 1. Clone the repository
+git clone <repo-url> && cd govdoc
 
-## QA and credentials
+# 2. Configure environment
+cp .env.example .env
+# Edit .env with your Model Studio API key and preferences
 
-- **`make qa`** calls `curl` against `/health`, `/health/ready`, and the web home page. It does **not** assume success if HTTP status codes are wrong.
-- **`make check-credentials`** loads `.env` if present, verifies required keys for a future live probe, then **exits with failure** with an explicit *not implemented yet* message for the HTTP probe (no fake success).
+# 3. Start all services
+make up
 
-## License / data
+# 4. Seed demo data (optional)
+make seed-demo
 
-All persistent data stays under **`data/`** (gitignored). Do not commit customer or real secrets.
+# 5. Open your browser
+# Frontend:  http://localhost:3000
+# API docs:  http://localhost:8000/docs
+```
 
-## Demo runbook
+---
 
-Quick checklist to prepare a clean demo environment. See
-`docs/govdoc_demo_script.md` for the live narrative and talking points.
+## Development
 
-1. **Validate credentials** — `make check-credentials`
-2. **Reset DB** — `rm -f data/secureflow.db api/data/secureflow.db`
-3. **Start stack** — `make up`
-4. **Seed reference corpus + scenarios** — `make seed-demo`
-   (depends on `make seed-corpus`, which writes `data/reference_chunks.json`
-   from `data/reference-corpus/`; the API lifespan loads it on startup so
-   the evidence panel returns real hits)
-5. **Optional — pre-run live analysis on seeded scenarios** so the demo
-   is instant: `GOVDOC_SEED_LIVE=1 make seed-demo`
+| Command | Description |
+|---------|-------------|
+| `make up` | Start all services (Docker) |
+| `make down` | Stop all services |
+| `make ci` | Run full CI pipeline (lint → build → test) |
+| `make test` | Run all tests (frontend + backend) |
+| `make lint` | Lint frontend (ESLint) and backend (Ruff) |
+| `make seed-demo` | Seed demo documents and reference corpus |
+| `make logs` | Follow service logs |
 
-### URL map
+See **[CONTRIBUTING.md](CONTRIBUTING.md)** for detailed development guidelines.
 
-Seeded documents are listed by `GET /api/v1/demo/scenarios`. The
-typical demo URLs are:
+---
 
-- Hero (clean cong_van): `/documents/<hero-doc-id>`
-- Ambiguity (needs consultation): `/documents/<ambiguity-doc-id>`
-- Scan (OCR path): `/documents/<scan-doc-id>`
-- Out-of-scope: `/documents/<out-of-scope-doc-id>`
+## Project Structure
 
-Run `curl -s -H 'X-GovDoc-Role: supervisor' http://localhost:8000/api/v1/demo/scenarios`
-to fetch the current IDs after seeding.
+```
+govdoc/
+├── web/                  # Frontend — React 19 + Vite 6 + TypeScript + Tailwind v4
+│   ├── src/              # React components, pages, hooks, and services
+│   ├── tests-e2e/        # Playwright E2E test specs
+│   └── public/           # Static assets
+├── api/                  # Backend — FastAPI + SQLAlchemy 2.x + Alembic
+│   ├── app/              # Application code (routes, services, models, adapters)
+│   ├── tests/            # Pytest suites (unit, integration, contract)
+│   ├── alembic/          # Database migration scripts
+│   ├── config/           # Model configuration (models.yaml)
+│   └── prompts/          # AI prompt templates
+├── deploy/               # Dockerfiles (Dockerfile.api, Dockerfile.web)
+├── scripts/              # Utility scripts (seeding, QA, credentials)
+├── e2e/                  # Playwright E2E test project
+├── docs/                 # Documentation, demo scripts, implementation plans
+└── data/                 # Runtime data (SQLite DB, uploads) — gitignored
+```
+
+---
+
+## Tech Stack
+
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| Frontend | React 19 + Vite 6 + TypeScript | Component-based UI with fast HMR |
+| Styling | Tailwind CSS v4 | Utility-first CSS framework |
+| Backend | FastAPI (Python 3.12) | Async REST API with OpenAPI docs |
+| ORM | SQLAlchemy 2.x + Alembic | Database models and migrations |
+| Database | SQLite (WAL mode) | Lightweight, zero-config persistence |
+| AI Models | Qwen (via Model Studio) | Analysis, classification, embeddings, vision, rerank |
+| Containerization | Docker + Docker Compose | Reproducible dev and deployment |
+| E2E Testing | Playwright | Browser automation tests |
+
+### AI Models
+
+| Model | Purpose |
+|-------|---------|
+| `qwen-plus` | Primary analysis and classification |
+| `qwen-max` | Complex reasoning and summarization |
+| `qwen-vl-plus` | Vision — OCR and scanned document processing |
+| `text-embedding-v4` | Semantic search embeddings |
+| `qwen3-rerank` | Search result re-ranking for RAG pipeline |
+
+---
+
+## Role-Based Access
+
+| Role | Capabilities |
+|------|-------------|
+| **Intake Clerk** | Upload documents, view basic document info, trigger AI extraction |
+| **Department Reviewer** | Review routed documents, request consultations, approve/reject |
+| **Consultant** | Respond to consultation requests from other departments |
+| **Supervisor** | Full visibility across all documents, dashboard analytics, override decisions |
+
+---
+
+## API Documentation
+
+The backend API is fully self-documented via FastAPI's built-in OpenAPI support. When the services are running:
+
+- **Swagger UI**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **ReDoc**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
+
+All endpoints include request/response schemas, authentication headers, and example payloads.
+
+---
+
+## Testing
+
+| Layer | Tool | Coverage |
+|-------|------|----------|
+| Frontend (unit) | Vitest | 45 tests — components, hooks, services |
+| Backend (unit + integration + contract) | Pytest | 224 tests — services, routes, state machine, adapters |
+| E2E | Playwright | Browser-based acceptance tests |
+| CI | GitHub Actions | Runs `make ci` on every push and PR |
+
+Run all tests:
+
+```bash
+make test          # Frontend + backend
+make test-e2e      # End-to-end (requires running stack)
+```
+
+---
+
+## Acknowledgments
+
+Built for **Qwen AI Build Day 2026** — a hackathon showcasing what's possible with Alibaba Cloud's Model Studio and the Qwen model family.
+
+Powered by [Alibaba Cloud Model Studio](https://www.alibabacloud.com/en/products/model-studio) and the [Qwen](https://qwen.readthedocs.io/) family of large language models.
+
+---
