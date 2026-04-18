@@ -87,16 +87,16 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
         {stats.map((stat) => (
-          <Card key={stat.label} className="h-full">
-            <CardContent className="p-5 flex flex-col h-full gap-4">
-              <div className="flex items-center justify-between">
-                <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center shrink-0">
+          <Card key={stat.label} className="flex h-full min-h-0 flex-col">
+            <CardContent className="flex flex-1 flex-col gap-4 p-5">
+              <div className="flex h-10 shrink-0 items-center justify-between gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-50">
                   {stat.icon}
                 </div>
                 <span
-                  className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                  className={`inline-flex shrink-0 items-center text-[11px] font-bold whitespace-nowrap rounded-full px-2 py-0.5 ${
                     stat.trend.startsWith('+')
                       ? 'bg-emerald-50 text-emerald-700'
                       : 'bg-red-50 text-red-700'
@@ -105,13 +105,11 @@ export default function DashboardPage() {
                   {stat.trend}
                 </span>
               </div>
-              <div className="mt-auto">
-                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider leading-snug min-h-[1.25rem]">
+              <div className="mt-auto min-h-0 space-y-1">
+                <p className="min-h-[2.5rem] text-[11px] font-bold uppercase leading-snug tracking-wider text-slate-400">
                   {stat.label}
                 </p>
-                <p className="text-2xl font-black text-slate-900 leading-none mt-1">
-                  {stat.value}
-                </p>
+                <p className="text-2xl font-black leading-none text-slate-900">{stat.value}</p>
               </div>
             </CardContent>
           </Card>

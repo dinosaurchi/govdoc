@@ -1,7 +1,9 @@
 import * as React from 'react';
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
 
-function cn(...args: (string | undefined | false)[]) {
-  return args.filter(Boolean).join(' ');
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
 }
 
 export function Card({

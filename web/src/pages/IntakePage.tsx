@@ -229,9 +229,12 @@ export default function IntakePage() {
         </div>
       )}
 
-      <div className="grid lg:grid-cols-3 gap-6 items-stretch">
-        <Card className="lg:col-span-2 flex flex-col">
-          <CardContent className="p-8 flex-1 flex flex-col gap-6">
+      <div className="grid items-stretch gap-6 lg:grid-cols-3">
+        <Card className="flex min-h-0 flex-col lg:col-span-2">
+          <CardHeader className="pb-4">
+            <CardTitle className="text-base">Upload document</CardTitle>
+          </CardHeader>
+          <CardContent className="flex min-h-0 flex-1 flex-col gap-6">
             <input
               ref={inputRef}
               type="file"
@@ -247,10 +250,10 @@ export default function IntakePage() {
               type="button"
               disabled={!canIntake || loading}
               onClick={() => inputRef.current?.click()}
-              className={`flex-1 min-h-[260px] w-full border-2 border-dashed rounded-2xl p-10 flex flex-col items-center justify-center gap-4 transition-colors ${
+              className={`flex min-h-[260px] w-full flex-1 flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed p-10 transition-colors ${
                 canIntake && !loading
-                  ? 'border-slate-200 hover:border-blue-400 cursor-pointer bg-slate-50'
-                  : 'border-slate-100 bg-slate-50/50 cursor-not-allowed opacity-50'
+                  ? 'cursor-pointer border-slate-200 bg-slate-50 hover:border-blue-400'
+                  : 'cursor-not-allowed border-slate-100 bg-slate-50/50 opacity-50'
               }`}
             >
               <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center">
@@ -280,11 +283,11 @@ export default function IntakePage() {
           </CardContent>
         </Card>
 
-        <Card className="flex flex-col">
-          <CardHeader>
+        <Card className="flex min-h-0 flex-col">
+          <CardHeader className="pb-4">
             <CardTitle className="text-base">Intake Guidelines</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4 text-sm text-slate-600 flex-1">
+          <CardContent className="flex-1 space-y-4 text-sm text-slate-600">
             <div className="space-y-1">
               <p className="font-bold text-slate-900">1. Verify Origin</p>
               <p>Ensure the document is from an authorized sender or department.</p>
