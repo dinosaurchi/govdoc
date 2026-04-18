@@ -110,6 +110,7 @@ export default function ConsultationPage() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [visibleLimit, setVisibleLimit] = useState(INITIAL_SIDEBAR_LIMIT);
+  const [resolvingNoteId, setResolvingNoteId] = useState<string | null>(null);
 
   const currentRoleId = ROLE_ID_BY_LABEL[role];
   const canSend = canReply(role);
@@ -206,6 +207,24 @@ export default function ConsultationPage() {
       resolvedThreads: resolved.sort(byRecency),
     };
   }, [documents, query]);
+
+  const handleResolveNote = async (note: ConsultationNote) => {
+    if (!selectedDoc || note.resolved_at) return;
+    setResolvingNoteId(note.id);
+    setError(null);
+    try {
+      await apiPost(
+        `/documents/${selectedDoc.id}/resolve-consultation/${note.id}`,
+        undefined,
+        role,
+      );
+      await fetchConsultations({ preserveSelection: true });
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to resolve note');
+    } finally {
+      setResolvingNoteId(null);
+    }
+  };
 
   const handleSendMessage = async () => {
     if (!message.trim() || !selectedDoc || !canSend) return;
@@ -399,16 +418,36 @@ export default function ConsultationPage() {
                   <p className="text-sm font-medium">No notes yet. Be the first to comment.</p>
                 </div>
               )}
-              {sortedNotes.map((note) => (
-                <ChatMessage
-                  key={note.id}
-                  note={note}
-                  isOwn={note.author_role === currentRoleId}
-                />
-              ))}
+              {sortedNotes.map((note) => {
+                // A note can be resolved by the role that was asked
+                // (`target_role`) — but not by the author themselves, and
+                // only while the doc is still on `in_consultation`.
+                const canResolveThisNote =
+                  !note.resolved_at &&
+                  !!note.target_role &&
+                  note.target_role === currentRoleId &&
+                  note.author_role !== currentRoleId &&
+                  selectedDoc?.status === 'in_consultation';
+                return (
+                  <ChatMessage
+                    key={note.id}
+                    note={note}
+                    isOwn={note.author_role === currentRoleId}
+                    canResolve={canResolveThisNote}
+                    isResolving={resolvingNoteId === note.id}
+                    onResolve={() => handleResolveNote(note)}
+                  />
+                );
+              })}
             </div>
 
             <div className="p-3 border-t border-slate-100 bg-white space-y-2">
+              {selectedDoc && (
+                <ThreadStatusHint
+                  doc={selectedDoc}
+                  currentRoleId={currentRoleId}
+                />
+              )}
               {error && (
                 <div
                   className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2"
@@ -667,7 +706,103 @@ function StatusPill({ status, small }: { status: string; small?: boolean }) {
 // Chat bubble
 // ---------------------------------------------------------------------------
 
-function ChatMessage({ note, isOwn }: { note: ConsultationNote; isOwn: boolean }) {
+function ThreadStatusHint({
+  doc,
+  currentRoleId,
+}: {
+  doc: ConsultDoc;
+  currentRoleId: string;
+}) {
+  const openNotes = doc.consultation_notes.filter((n) => !n.resolved_at);
+  const openForMe = openNotes.filter(
+    (n) => n.target_role && n.target_role === currentRoleId && n.author_role !== currentRoleId,
+  );
+  const docHref = `/documents/${doc.id}`;
+
+  if (doc.status === 'in_consultation') {
+    if (openForMe.length > 0) {
+      return (
+        <div
+          data-testid="consultation-thread-hint"
+          data-tone="action"
+          className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"
+        >
+          {openForMe.length} note{openForMe.length === 1 ? '' : 's'} waiting for your reply.{' '}
+          Mark resolved once you&rsquo;re done — the reviewer will pick up from there.
+        </div>
+      );
+    }
+    if (openNotes.length > 0) {
+      return (
+        <div
+          data-testid="consultation-thread-hint"
+          data-tone="waiting"
+          className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2"
+        >
+          Waiting on {openNotes.length} open note{openNotes.length === 1 ? '' : 's'} from{' '}
+          other role(s). Status will flip to Under Review once everyone resolves.
+        </div>
+      );
+    }
+    // `in_consultation` with zero open notes shouldn't normally happen
+    // after the backend fix; surface defensively so it's debuggable.
+    return (
+      <div
+        data-testid="consultation-thread-hint"
+        data-tone="defensive"
+        className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2"
+      >
+        All notes resolved. Waiting for reviewer to pick up the document.
+      </div>
+    );
+  }
+
+  // Thread is no longer `in_consultation` (under_review, approved, closed,
+  // etc). If orphaned open notes remain, let the target role still resolve
+  // them in-place (handled by the Resolve button on the bubble) and nudge
+  // other roles to the document page for next-step decisions.
+  if (openNotes.length > 0 && openForMe.length > 0) {
+    return (
+      <div
+        data-testid="consultation-thread-hint"
+        data-tone="orphaned"
+        className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"
+      >
+        Document is <strong>{doc.status.replace(/_/g, ' ')}</strong>. You still have{' '}
+        {openForMe.length} open note{openForMe.length === 1 ? '' : 's'} — resolve{' '}
+        {openForMe.length === 1 ? 'it' : 'them'} to keep the record clean.
+      </div>
+    );
+  }
+
+  return (
+    <div
+      data-testid="consultation-thread-hint"
+      data-tone="closed"
+      className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2"
+    >
+      This thread is <strong>{doc.status.replace(/_/g, ' ')}</strong>.{' '}
+      <a href={docHref} className="font-semibold text-blue-600 hover:underline">
+        Open the document page
+      </a>{' '}
+      for approve / reroute / close actions.
+    </div>
+  );
+}
+
+function ChatMessage({
+  note,
+  isOwn,
+  canResolve,
+  isResolving,
+  onResolve,
+}: {
+  note: ConsultationNote;
+  isOwn: boolean;
+  canResolve: boolean;
+  isResolving: boolean;
+  onResolve: () => void;
+}) {
   const label = ROLE_LABEL_BY_ID[note.author_role] ?? note.author_role;
   const time = new Date(note.created_at).toLocaleTimeString([], {
     hour: '2-digit',
@@ -714,6 +849,23 @@ function ChatMessage({ note, isOwn }: { note: ConsultationNote; isOwn: boolean }
         >
           {note.body}
         </div>
+        {canResolve && (
+          <button
+            type="button"
+            onClick={onResolve}
+            disabled={isResolving}
+            data-testid="consultation-resolve-note"
+            data-note-id={note.id}
+            className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-[11px] font-bold uppercase tracking-wide text-emerald-800 hover:bg-emerald-100 disabled:opacity-60 disabled:cursor-wait"
+          >
+            {isResolving ? (
+              <Loader2 className="animate-spin" size={12} />
+            ) : (
+              <CheckCircle2 size={12} />
+            )}
+            {isResolving ? 'Resolving…' : 'Mark as resolved'}
+          </button>
+        )}
       </div>
     </div>
   );
