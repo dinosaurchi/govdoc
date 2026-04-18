@@ -10,7 +10,7 @@ const HUBS: Array<{
   to: (docId: string) => string;
 }> = [
   { hub: 'document', label: 'Document', icon: FileText, to: (id) => `/documents/${id}` },
-  { hub: 'review', label: 'Review queue', icon: ListChecks, to: () => '/review' },
+  { hub: 'review', label: 'Review queue', icon: ListChecks, to: (id) => `/review?doc=${encodeURIComponent(id)}` },
   { hub: 'consultation', label: 'Consultation', icon: MessageSquare, to: (id) => `/consultation?doc=${id}` },
   { hub: 'response', label: 'Response', icon: ClipboardCheck, to: (id) => `/response?doc=${id}` },
 ];

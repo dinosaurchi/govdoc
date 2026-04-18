@@ -125,6 +125,21 @@ class TestDocumentList:
         for doc in data:
             assert doc["status"] == "analyzed"
 
+    def test_list_documents_search_matches_document_id(self, client, clerk_headers):
+        content = _make_text_file("Search by UUID should find this document.")
+        upload_resp = client.post(
+            "/api/v1/documents/",
+            headers=clerk_headers,
+            files={"file": ("uuid_search.txt", io.BytesIO(content), "text/plain")},
+        )
+        assert upload_resp.status_code == 200
+        doc_id = upload_resp.json()["document"]["id"]
+        resp = client.get(f"/api/v1/documents/?q={doc_id}", headers=clerk_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data, list)
+        assert any(d["id"] == doc_id for d in data)
+
 
 @pytest.mark.mock_integration
 class TestDocumentDetail:

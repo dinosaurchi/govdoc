@@ -1,5 +1,6 @@
 from typing import Any
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.repositories.base import CRUDBase
@@ -48,7 +49,15 @@ class DocumentRepository:
         if department_id:
             query = query.filter(Document.assigned_department_id == department_id)
         if q:
-            query = query.filter(Document.title.ilike(f"%{q}%"))
+            qs = q.strip()
+            if qs:
+                query = query.filter(
+                    or_(
+                        Document.title.ilike(f"%{qs}%"),
+                        Document.id == qs,
+                        Document.id.like(f"{qs}%"),
+                    )
+                )
         return query
 
     def list(

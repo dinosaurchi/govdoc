@@ -337,7 +337,7 @@ function DocumentDetailInner({ id }: { id: string }) {
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-20 animate-in fade-in duration-500">
       <div className="flex items-start gap-4">
-        <Link to="/review" className="p-2 hover:bg-slate-100 rounded-full transition shrink-0">
+        <Link to={`/review?doc=${doc.id}`} className="p-2 hover:bg-slate-100 rounded-full transition shrink-0">
           <ArrowLeft size={20} />
         </Link>
         <div className="min-w-0 flex-1 space-y-2">
@@ -599,7 +599,7 @@ function DocumentDetailInner({ id }: { id: string }) {
                       Open consultation page
                     </Link>
                     <Link
-                      to="/review"
+                      to={`/review?doc=${doc.id}`}
                       data-testid="consultation-thread-review-queue-link"
                       className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-700 hover:bg-slate-100"
                     >

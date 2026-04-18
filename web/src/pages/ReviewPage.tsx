@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Card } from '@/components/ui-card';
 import { Badge } from '@/components/ui-badge';
 import { Search, Loader2 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiGetPaged } from '@/lib/api';
 import { useRole } from '@/hooks/use-role';
 import { WorkflowDocConnections } from '@/components/WorkflowDocConnections';
@@ -22,6 +22,8 @@ const PAGE_SIZE = 25;
 export default function ReviewPage() {
   const { role } = useRole();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const highlightDocId = searchParams.get('doc');
   const [documents, setDocuments] = useState<DocListItem[]>([]);
   const [total, setTotal] = useState<number | null>(null);
   const [loadingFirst, setLoadingFirst] = useState(true);
@@ -34,6 +36,11 @@ export default function ReviewPage() {
     const t = setTimeout(() => setDebouncedQuery(rawQuery.trim()), 250);
     return () => clearTimeout(t);
   }, [rawQuery]);
+
+  /** Deep link /review?doc=<uuid> — filter the table to that document. */
+  useEffect(() => {
+    if (highlightDocId) setRawQuery(highlightDocId);
+  }, [highlightDocId]);
 
   const fetchPage = useCallback(
     async (offset: number, q: string) => {
@@ -103,6 +110,15 @@ export default function ReviewPage() {
     return () => observer.disconnect();
   }, [loadMore]);
 
+  const reviewTableRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (loadingFirst || !highlightDocId) return;
+    const row = reviewTableRef.current?.querySelector<HTMLElement>(
+      `[data-testid="review-row"][data-doc-id="${CSS.escape(highlightDocId)}"]`,
+    );
+    row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [loadingFirst, documents, highlightDocId]);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -112,6 +128,11 @@ export default function ReviewPage() {
           <p className="text-xs text-slate-400 mt-1 max-w-xl">
             Click a row for the full document hub. Use <strong className="font-semibold text-slate-500">Open elsewhere</strong>{' '}
             to jump to Consultation or Response for the same case.
+            {highlightDocId && (
+              <span className="block mt-1 text-blue-700/90">
+                Filtered to document <span className="font-mono">{highlightDocId.slice(0, 8)}…</span> (from link).
+              </span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -133,7 +154,7 @@ export default function ReviewPage() {
       </div>
 
       <Card>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" ref={reviewTableRef}>
           {loadingFirst ? (
             <div className="p-12 flex flex-col items-center justify-center text-slate-400 gap-4">
               <Loader2 className="animate-spin" size={32} />
@@ -181,9 +202,14 @@ export default function ReviewPage() {
                         navigate(`/documents/${doc.id}`);
                       }
                     }}
-                    className="cursor-pointer hover:bg-blue-50/50 focus:bg-blue-50 focus:outline-none transition-colors group"
+                    className={`cursor-pointer hover:bg-blue-50/50 focus:bg-blue-50 focus:outline-none transition-colors group ${
+                      highlightDocId === doc.id
+                        ? 'bg-blue-50/90 ring-2 ring-inset ring-blue-300'
+                        : ''
+                    }`}
                     data-testid="review-row"
                     data-doc-id={doc.id}
+                    data-highlighted={highlightDocId === doc.id ? 'true' : 'false'}
                   >
                     <td className="px-6 py-4 font-bold text-slate-900 group-hover:text-blue-800">
                       {doc.title}
