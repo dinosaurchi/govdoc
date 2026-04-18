@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 const INITIAL_SIDEBAR_LIMIT = 15;
 const SIDEBAR_PAGE_SIZE = 15;
@@ -87,6 +88,8 @@ type ResponseDetailDoc = ResponseListDoc & {
 
 export default function ResponsePage() {
   const { role } = useRole();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkDocId = searchParams.get('doc');
   const [documents, setDocuments] = useState<ResponseListDoc[]>([]);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [selectedDoc, setSelectedDoc] = useState<ResponseDetailDoc | null>(null);
@@ -95,8 +98,9 @@ export default function ResponsePage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [query, setQuery] = useState('');
   const [visibleLimit, setVisibleLimit] = useState(INITIAL_SIDEBAR_LIMIT);
+  const responseListRef = useRef<HTMLDivElement>(null);
 
-  const fetchResponses = async () => {
+  const fetchResponses = async (opts?: { preserveSelection?: boolean }) => {
     try {
       const data = await apiGet<ResponseListDoc[]>('/documents/', role);
       const respDocs = data.filter((d) =>
@@ -104,6 +108,12 @@ export default function ResponsePage() {
       );
       setDocuments(respDocs);
       setSelectedDocId((prev) => {
+        if (deepLinkDocId && respDocs.some((doc) => doc.id === deepLinkDocId)) {
+          return deepLinkDocId;
+        }
+        if (opts?.preserveSelection && prev && respDocs.some((doc) => doc.id === prev)) {
+          return prev;
+        }
         if (prev && respDocs.some((doc) => doc.id === prev)) return prev;
         return respDocs[0]?.id ?? null;
       });
@@ -115,28 +125,35 @@ export default function ResponsePage() {
   };
 
   useEffect(() => {
-    let active = true;
     (async () => {
-      try {
-        const data = await apiGet<ResponseListDoc[]>('/documents/', role);
-        const respDocs = data.filter((d) =>
-          ['approved', 'closed', 'under_review'].includes(d.status)
-        );
-        if (active) {
-          setDocuments(respDocs);
-          setSelectedDocId((prev) => {
-            if (prev && respDocs.some((doc) => doc.id === prev)) return prev;
-            return respDocs[0]?.id ?? null;
-          });
-        }
-      } catch (err) {
-        console.error(err);
-      } finally {
-        if (active) setLoadingList(false);
-      }
+      setLoadingList(true);
+      await fetchResponses({ preserveSelection: true });
     })();
-    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role]);
+
+  useEffect(() => {
+    if (!deepLinkDocId) return;
+    if (!documents.some((d) => d.id === deepLinkDocId)) return;
+    setSelectedDocId((prev) => (prev === deepLinkDocId ? prev : deepLinkDocId));
+  }, [deepLinkDocId, documents]);
+
+  const handleSelectDocId = (id: string) => {
+    setSelectedDocId(id);
+    if (searchParams.get('doc') && searchParams.get('doc') !== id) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('doc');
+      setSearchParams(next, { replace: true });
+    }
+  };
+
+  useEffect(() => {
+    if (!deepLinkDocId || !selectedDocId || selectedDocId !== deepLinkDocId || loadingList) return;
+    const root = responseListRef.current;
+    if (!root) return;
+    const card = root.querySelector<HTMLElement>(`[data-doc-id="${CSS.escape(selectedDocId)}"]`);
+    card?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [deepLinkDocId, selectedDocId, loadingList]);
 
   useEffect(() => {
     let active = true;
@@ -174,7 +191,7 @@ export default function ResponsePage() {
       if (selectedDoc.status !== 'closed') {
         await apiPost(`/documents/${selectedDoc.id}/close`, undefined, role);
       }
-      await fetchResponses();
+      await fetchResponses({ preserveSelection: true });
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Action failed');
     } finally {
@@ -260,9 +277,9 @@ export default function ResponsePage() {
           </li>
           <li>
             <strong>After Close</strong>, the case moves from Pending to <strong>Dispatched</strong> in the
-            left sidebar. The draft preview with the <strong>CLOSED</strong> stamp is the completed outcome on
-            this page — scroll to <strong>Dispatched</strong> if you closed the document from Review or
-            document detail.
+            left sidebar. The success banner on the document page includes a link that opens{' '}
+            <strong>this page with that case selected</strong> (same for approve). Or scroll to{' '}
+            <strong>Dispatched</strong> and pick the row manually.
           </li>
           <li>
             Nothing here yet? Only documents that have reached <strong>under review</strong> (or later)
@@ -292,6 +309,7 @@ export default function ResponsePage() {
             />
           </div>
           <div
+            ref={responseListRef}
             className="flex-1 overflow-y-auto min-h-0 pr-1 space-y-4"
             data-testid="response-list"
           >
@@ -310,7 +328,7 @@ export default function ResponsePage() {
                   label="Pending"
                   tone="amber"
                   selectedId={selectedDocId}
-                  onSelect={setSelectedDocId}
+                  onSelect={handleSelectDocId}
                   documents={pendingDocs}
                   visibleLimit={visibleLimit}
                   emptyHint={query ? 'No pending responses match.' : 'All caught up — nothing pending.'}
@@ -320,7 +338,7 @@ export default function ResponsePage() {
                     label="Dispatched"
                     tone="emerald"
                     selectedId={selectedDocId}
-                    onSelect={setSelectedDocId}
+                    onSelect={handleSelectDocId}
                     documents={dispatchedDocs}
                     visibleLimit={Math.max(0, visibleLimit - pendingDocs.length)}
                   />

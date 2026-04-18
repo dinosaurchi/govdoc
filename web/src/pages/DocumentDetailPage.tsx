@@ -165,7 +165,7 @@ function DocumentDetailInner({ id }: { id: string }) {
   const [flash, setFlash] = useState<{
     tone: 'success' | 'error';
     message: string;
-    link?: { to: string; label: string };
+    link?: { to: string; label: string; hint?: string };
   } | null>(null);
 
   const flashBannerRef = useRef<HTMLDivElement>(null);
@@ -250,17 +250,33 @@ function DocumentDetailInner({ id }: { id: string }) {
         await apiPost(`/documents/${id}/analyze`, undefined, role);
       }
       await fetchDoc({ silent: true });
+      let successLink: { to: string; label: string; hint?: string } | undefined;
+      if (action === 'request-consultation') {
+        successLink = {
+          to: `/consultation?doc=${id}`,
+          label: 'Open consultation thread',
+          hint:
+            'Same thread appears here under "Consultation thread" — use the link for the full chat view.',
+        };
+      } else if (action === 'approve') {
+        successLink = {
+          to: `/response?doc=${id}`,
+          label: 'Continue on Response & Closeout',
+          hint:
+            'Pending drafts stay in the Response queue until you approve and close — this link opens your case there.',
+        };
+      } else if (action === 'close') {
+        successLink = {
+          to: `/response?doc=${id}`,
+          label: 'View on Response & Closeout',
+          hint:
+            'After close, the case appears under Dispatched on the Response page — this link jumps straight to it.',
+        };
+      }
       setFlash({
         tone: 'success',
         message: actionSuccessMessage(action, payload, departments),
-        ...(action === 'request-consultation'
-          ? {
-              link: {
-                to: `/consultation?doc=${id}`,
-                label: 'Open consultation thread',
-              },
-            }
-          : {}),
+        ...(successLink ? { link: successLink } : {}),
       });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Action failed';
@@ -378,14 +394,14 @@ function DocumentDetailInner({ id }: { id: string }) {
               <div className="flex flex-wrap items-center gap-2">
                 <Link
                   to={flash.link.to}
-                  data-testid="consultation-request-follow-link"
+                  data-testid="document-flash-follow-link"
                   className="inline-flex items-center rounded-lg border border-emerald-400 bg-white px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-emerald-900 hover:bg-emerald-100"
                 >
                   {flash.link.label}
                 </Link>
-                <span className="text-[11px] text-emerald-800/90">
-                  Same thread appears here under &quot;Consultation thread&quot; — use the link for the full chat view.
-                </span>
+                {flash.link.hint && (
+                  <span className="text-[11px] text-emerald-800/90">{flash.link.hint}</span>
+                )}
               </div>
             )}
           </div>
