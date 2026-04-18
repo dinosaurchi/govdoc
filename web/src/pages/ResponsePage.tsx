@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   Info,
   Link2,
+  ChevronRight,
 } from 'lucide-react';
 import { apiGet, apiPost } from '@/lib/api';
 import { useRole } from '@/hooks/use-role';
@@ -268,34 +269,44 @@ export default function ResponsePage() {
         </div>
       </div>
 
-      <div
-        className="rounded-xl border border-emerald-100 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-950 mb-4 shrink-0 max-w-4xl"
-        role="region"
+      <details
+        className="rounded-xl border border-emerald-100 bg-emerald-50/70 mb-4 shrink-0 max-w-4xl group text-emerald-950"
         aria-label="How this queue works"
         data-testid="response-page-explainer"
       >
-        <p className="font-bold text-emerald-900 mb-2 flex items-center gap-2">
-          <Info size={16} className="shrink-0" /> How you get a result here
-        </p>
-        <ul className="text-xs text-emerald-900/90 space-y-1.5 list-disc pl-4 leading-relaxed">
-          <li>
-            <strong>Pending</strong> lists documents that are <strong>under review</strong> or{' '}
-            <strong>approved</strong> but not yet archived. As a <strong>Supervisor</strong>, open one
-            and click <strong>Approve &amp; Close</strong> (or approve + close from the document page — same
-            outcome).
-          </li>
-          <li>
-            <strong>After Close</strong>, the case moves from Pending to <strong>Dispatched</strong> in the
-            left sidebar. The success banner on the document page includes a link that opens{' '}
-            <strong>this page with that case selected</strong> (same for approve). Or scroll to{' '}
-            <strong>Dispatched</strong> and pick the row manually.
-          </li>
-          <li>
-            Nothing here yet? Only documents that have reached <strong>under review</strong> (or later)
-            appear. Roles that cannot list documents will see an empty queue.
-          </li>
-        </ul>
-      </div>
+        <summary
+          className="px-4 py-3 cursor-pointer text-sm font-bold text-emerald-900 flex items-center gap-2 list-none select-none [&::-webkit-details-marker]:hidden"
+          data-testid="response-page-explainer-summary"
+        >
+          <ChevronRight
+            size={18}
+            className="shrink-0 text-emerald-700 transition-transform duration-200 group-open:rotate-90"
+            aria-hidden
+          />
+          <Info size={16} className="shrink-0 text-emerald-800" aria-hidden />
+          How you get a result here
+        </summary>
+        <div className="px-4 pb-4 pt-0 border-t border-emerald-200/50">
+          <ul className="text-xs text-emerald-900/90 space-y-1.5 list-disc pl-4 leading-relaxed mt-3">
+            <li>
+              <strong>Pending</strong> lists documents that are <strong>under review</strong> or{' '}
+              <strong>approved</strong> but not yet archived. As a <strong>Supervisor</strong>, open one
+              and click <strong>Approve &amp; Close</strong> (or approve + close from the document page — same
+              outcome).
+            </li>
+            <li>
+              <strong>After Close</strong>, the case moves from Pending to <strong>Dispatched</strong> in the
+              left sidebar. The success banner on the document page includes a link that opens{' '}
+              <strong>this page with that case selected</strong> (same for approve). Or scroll to{' '}
+              <strong>Dispatched</strong> and pick the row manually.
+            </li>
+            <li>
+              Nothing here yet? Only documents that have reached <strong>under review</strong> (or later)
+              appear. Roles that cannot list documents will see an empty queue.
+            </li>
+          </ul>
+        </div>
+      </details>
 
       <div className="grid lg:grid-cols-3 gap-6 flex-1 min-h-0">
         {/* ----------------------------------------------------- Sidebar */}
