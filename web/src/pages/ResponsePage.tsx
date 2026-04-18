@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link as RouterLink, useSearchParams } from 'react-router-dom';
 
 const INITIAL_SIDEBAR_LIMIT = 15;
 const SIDEBAR_PAGE_SIZE = 15;
@@ -15,6 +15,7 @@ import {
   Search,
   AlertTriangle,
   Info,
+  Link2,
 } from 'lucide-react';
 import { apiGet, apiPost } from '@/lib/api';
 import { useRole } from '@/hooks/use-role';
@@ -139,13 +140,20 @@ export default function ResponsePage() {
     setSelectedDocId((prev) => (prev === deepLinkDocId ? prev : deepLinkDocId));
   }, [deepLinkDocId, documents]);
 
+  /** Keep ?doc= aligned with selection so every row has a stable, shareable URL. */
+  useEffect(() => {
+    if (loadingList || !selectedDocId) return;
+    if (searchParams.get('doc') === selectedDocId) return;
+    const next = new URLSearchParams(searchParams);
+    next.set('doc', selectedDocId);
+    setSearchParams(next, { replace: true });
+  }, [loadingList, selectedDocId, searchParams, setSearchParams]);
+
   const handleSelectDocId = (id: string) => {
     setSelectedDocId(id);
-    if (searchParams.get('doc') && searchParams.get('doc') !== id) {
-      const next = new URLSearchParams(searchParams);
-      next.delete('doc');
-      setSearchParams(next, { replace: true });
-    }
+    const next = new URLSearchParams(searchParams);
+    next.set('doc', id);
+    setSearchParams(next, { replace: true });
   };
 
   useEffect(() => {
@@ -504,6 +512,10 @@ function ResponseGroup({
   );
 }
 
+function responseDocHref(docId: string): string {
+  return `/response?doc=${encodeURIComponent(docId)}`;
+}
+
 function ResponseCard({
   doc,
   active,
@@ -513,6 +525,8 @@ function ResponseCard({
   active: boolean;
   onSelect: (id: string) => void;
 }) {
+  const hardlink = responseDocHref(doc.id);
+
   return (
     <div
       role="button"
@@ -536,11 +550,23 @@ function ResponseCard({
       <div className="p-3 space-y-1.5">
         <div className="flex items-center justify-between gap-2">
           <StatusPill status={doc.status} small />
-          {doc.created_at && (
-            <span className="text-[10px] text-slate-400 whitespace-nowrap">
-              {formatRelative(doc.created_at)}
-            </span>
-          )}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {doc.created_at && (
+              <span className="text-[10px] text-slate-400 whitespace-nowrap">
+                {formatRelative(doc.created_at)}
+              </span>
+            )}
+            <RouterLink
+              to={hardlink}
+              title="Open shareable link for this case (copy from address bar)"
+              aria-label="Hard link to this response"
+              data-testid="response-card-hardlink"
+              onClick={(e) => e.stopPropagation()}
+              className="p-1 rounded-md text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 transition-colors"
+            >
+              <Link2 size={14} />
+            </RouterLink>
+          </div>
         </div>
         <h4
           className="text-sm font-bold text-slate-900 leading-tight line-clamp-2"
