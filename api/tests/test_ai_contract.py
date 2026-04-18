@@ -367,8 +367,9 @@ class TestRolesConfig:
         assert "documents.create" in clerk_actions
         assert "documents.read" in clerk_actions
         assert "documents.list" in clerk_actions
-        # Clerk should NOT have escalation or close
+        # Clerk should NOT have escalation, approval, or close
         assert "documents.escalate" not in clerk_actions
+        assert "documents.approve" not in clerk_actions
         assert "documents.close" not in clerk_actions
 
 

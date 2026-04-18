@@ -265,3 +265,60 @@ class TestReviewEndpointTransitions:
         )
         assert response.status_code == 400
         assert response.json()["detail"]["error"]["code"] == "NO_AI_ROUTING"
+
+    def test_approve_from_under_review(self, client: TestClient):
+        document_id = _create_document(client)
+        _set_document_status(document_id, DocumentStatus.under_review)
+
+        response = client.post(
+            f"/api/v1/documents/{document_id}/approve",
+            headers={"X-GovDoc-Role": "reviewer"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["document"]["status"] == "approved"
+
+    def test_approve_rejects_with_open_consultation_notes(self, client: TestClient):
+        document_id = _create_document(client)
+        note_id = str(uuid.uuid4())
+        db = SessionLocal()
+        try:
+            document = db.query(Document).filter(Document.id == document_id).one()
+            document.status = DocumentStatus.under_review
+            db.add(
+                ConsultationNote(
+                    id=note_id,
+                    document_id=document_id,
+                    author_role="reviewer",
+                    target_role="consultant",
+                    body="Still open",
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        response = client.post(
+            f"/api/v1/documents/{document_id}/approve",
+            headers={"X-GovDoc-Role": "reviewer"},
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"]["error"]["code"] == "OPEN_CONSULTATION_NOTES"
+
+    def test_close_requires_approved_status(self, client: TestClient):
+        document_id = _create_document(client)
+        _set_document_status(document_id, DocumentStatus.under_review)
+
+        bad = client.post(
+            f"/api/v1/documents/{document_id}/close",
+            headers={"X-GovDoc-Role": "supervisor"},
+        )
+        assert bad.status_code == 400
+        assert bad.json()["detail"]["error"]["code"] == "INVALID_TRANSITION"
+
+        _set_document_status(document_id, DocumentStatus.approved)
+        good = client.post(
+            f"/api/v1/documents/{document_id}/close",
+            headers={"X-GovDoc-Role": "supervisor"},
+        )
+        assert good.status_code == 200, good.text
+        assert good.json()["document"]["status"] == "closed"

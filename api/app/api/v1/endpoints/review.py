@@ -21,6 +21,17 @@ import uuid
 router = APIRouter(prefix="/documents", tags=["workflow"])
 
 
+def _count_unresolved_consultation_notes(db: Session, document_id: str) -> int:
+    return (
+        db.query(ConsultationNote)
+        .filter(
+            ConsultationNote.document_id == document_id,
+            ConsultationNote.resolved_at.is_(None),
+        )
+        .count()
+    )
+
+
 @router.post("/{document_id}/approve-routing", response_model=WorkflowActionResponse)
 async def approve_routing(
     document_id: str,
@@ -335,13 +346,66 @@ async def mark_out_of_scope(
     return {"document": document, "message": "Document marked as out of scope"}
 
 
+@router.post("/{document_id}/approve", response_model=WorkflowActionResponse)
+async def approve_document(
+    document_id: str,
+    role: CurrentRole = Depends(require_action("documents.approve")),
+    db: Session = Depends(get_db),
+):
+    """Approve the document — transitions to `approved` (archive/close is separate).
+
+    Allowed from `under_review` or `in_consultation`. Blocked while consultation
+    notes are still open so approval cannot skip parallel review work.
+    """
+    document = db.query(Document).filter(Document.id == document_id).first()
+    if not document:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "Document not found", "details": {}}},
+        )
+
+    open_notes = _count_unresolved_consultation_notes(db, document_id)
+    if open_notes > 0:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "OPEN_CONSULTATION_NOTES",
+                    "message": "Resolve all consultation notes before approving.",
+                    "details": {"open_notes": open_notes},
+                }
+            },
+        )
+
+    try:
+        validate_transition(document.status, DocumentStatus.approved)
+    except InvalidTransitionError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"code": "INVALID_TRANSITION", "message": str(e), "details": {}}},
+        )
+
+    old_status = document.status.value
+    document.status = DocumentStatus.approved
+    write_audit_event(
+        db,
+        document_id=document_id,
+        actor_role=role.id,
+        event_type="workflow.transition",
+        from_state=old_status,
+        to_state="approved",
+    )
+    db.commit()
+    return {"document": document, "message": "Document approved"}
+
+
 @router.post("/{document_id}/close", response_model=WorkflowActionResponse)
 async def close_document(
     document_id: str,
     role: CurrentRole = Depends(require_action("documents.close")),
     db: Session = Depends(get_db),
 ):
-    """Close document — supervisor only."""
+    """Close document — supervisor only, from `approved` to `closed`."""
     document = db.query(Document).filter(Document.id == document_id).first()
     if not document:
         raise HTTPException(
@@ -350,36 +414,22 @@ async def close_document(
         )
 
     try:
-        # Transition to approved if not already
-        if document.status != DocumentStatus.approved:
-            validate_transition(document.status, DocumentStatus.approved)
-            old_status = document.status.value
-            document.status = DocumentStatus.approved
-            write_audit_event(
-                db,
-                document_id=document_id,
-                actor_role=role.id,
-                event_type="workflow.transition",
-                from_state=old_status,
-                to_state="approved",
-            )
-
         validate_transition(document.status, DocumentStatus.closed)
-        old_status = document.status.value
-        document.status = DocumentStatus.closed
-        write_audit_event(
-            db,
-            document_id=document_id,
-            actor_role=role.id,
-            event_type="workflow.transition",
-            from_state=old_status,
-            to_state="closed",
-        )
     except InvalidTransitionError as e:
         raise HTTPException(
             status_code=400,
             detail={"error": {"code": "INVALID_TRANSITION", "message": str(e), "details": {}}},
         )
 
+    old_status = document.status.value
+    document.status = DocumentStatus.closed
+    write_audit_event(
+        db,
+        document_id=document_id,
+        actor_role=role.id,
+        event_type="workflow.transition",
+        from_state=old_status,
+        to_state="closed",
+    )
     db.commit()
     return {"document": document, "message": "Document closed"}
