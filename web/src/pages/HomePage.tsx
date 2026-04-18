@@ -5,6 +5,7 @@ import { ArrowRight, CheckCircle2, Clock, AlertCircle, FileUp, ListChecks, Messa
 import { Link } from 'react-router-dom';
 import { useState } from 'react';
 import { apiPost } from '@/lib/api';
+import { DemoWalkthrough } from '@/components/demo-walkthrough';
 
 export default function HomePage() {
   const { role } = useRole();
@@ -81,6 +82,8 @@ export default function HomePage() {
           icon={<LayoutDashboard className="w-8 h-8 text-emerald-500" />}
         />
       </div>
+
+      <DemoWalkthrough variant="home" />
 
       <div className="grid md:grid-cols-3 gap-6 pt-12">
         <div className="p-6 bg-white border border-slate-200 rounded-2xl shadow-sm space-y-3">
