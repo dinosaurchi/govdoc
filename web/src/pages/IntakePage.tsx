@@ -17,7 +17,7 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { uploadDocument } from '@/lib/api';
-import { DEMO_SAMPLE_FILES } from '@/lib/demo-samples';
+import { DEMO_SAMPLE_FILES, demoSampleFileUrl } from '@/lib/demo-samples';
 
 // ---------------------------------------------------------------------------
 // Stepper model
@@ -298,7 +298,7 @@ export default function IntakePage() {
             <CardContent className="flex-1 space-y-3 text-sm">
               <ul className="space-y-3">
                 {DEMO_SAMPLE_FILES.map((f) => (
-                  <li key={f.href} className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+                  <li key={f.filename} className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 space-y-1">
                         <div className="flex items-center gap-2 font-semibold text-slate-900">
@@ -311,7 +311,7 @@ export default function IntakePage() {
                         </p>
                       </div>
                       <a
-                        href={f.href}
+                        href={demoSampleFileUrl(f.filename)}
                         download={f.filename}
                         className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-blue-600 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-blue-700"
                       >

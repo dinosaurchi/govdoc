@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from app.api import deps
 from app.api.deps import require_action, CurrentRole
@@ -8,6 +11,39 @@ from app.services.demo import seed_all
 from app.core.config import settings
 
 router = APIRouter(prefix="/demo", tags=["demo"])
+
+# api/app/api/v1/endpoints/demo.py → parents[5] = repo root (govdoc/)
+_PROJECT_ROOT = Path(__file__).resolve().parents[5]
+_DEMO_SAMPLE_FILES = frozenset(
+    {
+        "sample-cong-van-dong-nai.pdf",
+        "sample-bao-cao-dong-nai.pdf",
+    }
+)
+
+
+def _demo_sample_pdf_dir() -> Path:
+    """Prefer Docker-bundled PDFs; fall back to web/public/demo in local dev."""
+    docker_dir = Path("/app/demo-sample-pdfs")
+    if docker_dir.is_dir() and any(docker_dir.glob("*.pdf")):
+        return docker_dir
+    return _PROJECT_ROOT / "web" / "public" / "demo"
+
+
+@router.get("/sample-files/{filename}")
+async def download_demo_sample_file(filename: str) -> FileResponse:
+    """Serve bundled demo PDFs via the API so downloads work through /api/ (nginx proxy) with correct MIME type."""
+    if filename not in _DEMO_SAMPLE_FILES:
+        raise HTTPException(status_code=404, detail="Unknown sample file")
+    path = _demo_sample_pdf_dir() / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Sample file not available on server")
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename=filename,
+        content_disposition_type="attachment",
+    )
 
 
 @router.get("/scenarios", response_model=list[DemoScenarioOut])
