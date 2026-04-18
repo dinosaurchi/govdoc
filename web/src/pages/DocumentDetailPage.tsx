@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui-card';
 import { Badge } from '@/components/ui-badge';
@@ -18,18 +18,36 @@ import {
   XCircle,
   AlertCircle,
   Info,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  UserCheck,
+  Sparkles,
+  Building2,
+  ListChecks,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { WorkflowDocConnections } from '@/components/WorkflowDocConnections';
 import { apiGet, apiPost } from '@/lib/api';
+import { formatBytes } from '@/lib/format';
 import { useRole } from '@/hooks/use-role';
 import {
   getWorkflowActionStates,
   getWorkflowStatusMessage,
-  ACTION_GROUP_LABELS,
   isTerminalStatus,
   toRoleId,
   toButtonVariant,
+  PIPELINE_STAGES,
+  getPipelineStepState,
+  getResponsibleRoles,
+  getNextStepHint,
+  getActionsAvailableForOtherRoles,
+  toFrontendRoleLabel,
+  partitionByForwardness,
+  getForwardActionId,
+  ROLE_LABEL,
   type ButtonVariant,
+  type Role,
 } from '@/pages/document-detail/workflow-actions';
 
 type AIAnalysis = {
@@ -134,7 +152,7 @@ export default function DocumentDetailPage() {
 }
 
 function DocumentDetailInner({ id }: { id: string }) {
-  const { role } = useRole();
+  const { role, setRole } = useRole();
   const [doc, setDoc] = useState<DocDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -146,6 +164,31 @@ function DocumentDetailInner({ id }: { id: string }) {
   const [rerouteDepartmentId, setRerouteDepartmentId] = useState('');
   const [rerouteRationale, setRerouteRationale] = useState('');
   const [analysisView, setAnalysisView] = useState<'rendered' | 'raw'>('rendered');
+  const [flash, setFlash] = useState<{
+    tone: 'success' | 'error';
+    message: string;
+    link?: { to: string; label: string; hint?: string };
+  } | null>(null);
+
+  const flashBannerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!flash) return;
+    // Success banners with a next-step link stay until dismissed (return visits).
+    if (flash.tone === 'success' && flash.link) return;
+    const handle = window.setTimeout(() => setFlash(null), 5000);
+    return () => window.clearTimeout(handle);
+  }, [flash]);
+
+  // After requesting consultation the user is often scrolled to the workflow
+  // panel — scroll the success banner into view so the follow-up link is seen.
+  useEffect(() => {
+    if (!flash?.link) return;
+    const id = requestAnimationFrame(() => {
+      flashBannerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [flash]);
 
   const fetchDoc = async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
@@ -197,6 +240,8 @@ function DocumentDetailInner({ id }: { id: string }) {
         await apiPost(`/documents/${id}/escalate`, undefined, role);
       } else if (action === 'mark-out-of-scope') {
         await apiPost(`/documents/${id}/mark-out-of-scope`, undefined, role);
+      } else if (action === 'approve') {
+        await apiPost(`/documents/${id}/approve`, undefined, role);
       } else if (action === 'close') {
         await apiPost(`/documents/${id}/close`, undefined, role);
       } else if (action === 'request-consultation') {
@@ -207,8 +252,37 @@ function DocumentDetailInner({ id }: { id: string }) {
         await apiPost(`/documents/${id}/analyze`, undefined, role);
       }
       await fetchDoc({ silent: true });
+      let successLink: { to: string; label: string; hint?: string } | undefined;
+      if (action === 'request-consultation') {
+        successLink = {
+          to: `/consultation?doc=${id}`,
+          label: 'Open consultation thread',
+          hint:
+            'Same thread appears here under "Consultation thread" — use the link for the full chat view.',
+        };
+      } else if (action === 'approve') {
+        successLink = {
+          to: `/response?doc=${id}`,
+          label: 'Continue on Response & Closeout',
+          hint:
+            'Pending drafts stay in the Response queue until you approve and close — this link opens your case there.',
+        };
+      } else if (action === 'close') {
+        successLink = {
+          to: `/response?doc=${id}`,
+          label: 'View on Response & Closeout',
+          hint:
+            'After close, the case appears under Dispatched on the Response page — this link jumps straight to it.',
+        };
+      }
+      setFlash({
+        tone: 'success',
+        message: actionSuccessMessage(action, payload, departments),
+        ...(successLink ? { link: successLink } : {}),
+      });
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Action failed');
+      const message = err instanceof Error ? err.message : 'Action failed';
+      setFlash({ tone: 'error', message });
     } finally {
       setActionLoading(false);
     }
@@ -244,12 +318,6 @@ function DocumentDetailInner({ id }: { id: string }) {
     ? { available: [], disabled: [], hidden: [] }
     : getWorkflowActionStates(doc, roleId);
 
-  const visibleActions = [
-    ...actionStates.available.map((a) => ({ action: a, available: true, reason: null as string | null })),
-    ...actionStates.disabled.map((d) => ({ action: d.action, available: false, reason: d.reason })),
-  ];
-  const actionGroupKeys = ['analysis', 'review', 'consultation', 'closeout'] as const;
-
   const getActionIcon = (actionId: string) => {
     switch (actionId) {
       case 'analyze': return <BrainCircuit size={16} />;
@@ -257,6 +325,7 @@ function DocumentDetailInner({ id }: { id: string }) {
       case 'reroute': return <Send size={16} />;
       case 'request-consultation': return <MessageSquare size={16} />;
       case 'resolve-consultation': return <CheckCircle2 size={16} />;
+      case 'approve': return <CheckCircle2 size={16} />;
       case 'escalate': return <AlertTriangle size={16} />;
       case 'mark-out-of-scope': return <Send size={16} />;
       case 'close': return <CheckCircle2 size={16} />;
@@ -267,30 +336,114 @@ function DocumentDetailInner({ id }: { id: string }) {
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-20 animate-in fade-in duration-500">
-      <div className="flex items-center gap-4">
-        <Link to="/review" className="p-2 hover:bg-slate-100 rounded-full transition">
+      <div className="flex items-start gap-4">
+        <Link to={`/review?doc=${doc.id}`} className="p-2 hover:bg-slate-100 rounded-full transition shrink-0">
           <ArrowLeft size={20} />
         </Link>
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-black tracking-tight text-slate-900">{doc.title}</h1>
-            {doc.urgency !== 'normal' && (
-              <Badge className={`uppercase text-[10px] font-black ${doc.urgency === 'critical' ? 'bg-red-600' : 'bg-orange-500'}`}>
-                {doc.urgency}
-              </Badge>
-            )}
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-2xl font-black tracking-tight text-slate-900">{doc.title}</h1>
+                {doc.urgency !== 'normal' && (
+                  <Badge className={`uppercase text-[10px] font-black ${doc.urgency === 'critical' ? 'bg-red-600' : 'bg-orange-500'}`}>
+                    {doc.urgency}
+                  </Badge>
+                )}
+              </div>
+              <p className="text-slate-500 text-sm font-medium">
+                Created: {new Date(doc.created_at).toLocaleString()}
+                {doc.issuing_agency && <> · From: {doc.issuing_agency}</>}
+              </p>
+              <p
+                className="text-slate-600 text-sm font-medium flex items-center gap-1.5 mt-1"
+                data-testid="document-assigned-department"
+              >
+                <Building2 size={14} className="text-slate-400" />
+                <span className="text-slate-500">Assigned to:</span>
+                {doc.assigned_department_id ? (
+                  <span className="font-bold text-slate-800">{displayDepartment(doc.assigned_department_id)}</span>
+                ) : (
+                  <span className="italic text-slate-400">Not yet assigned</span>
+                )}
+              </p>
+            </div>
+            <Badge className="px-4 py-1 text-sm font-bold capitalize shrink-0">
+              {doc.status.replace(/_/g, ' ')}
+            </Badge>
           </div>
-          <p className="text-slate-500 text-sm font-medium">
-            Created: {new Date(doc.created_at).toLocaleString()}
-            {doc.issuing_agency && <> · From: {doc.issuing_agency}</>}
-          </p>
-        </div>
-        <div className="ml-auto">
-          <Badge className="px-4 py-1 text-sm font-bold capitalize">
-            {doc.status.replace(/_/g, ' ')}
-          </Badge>
         </div>
       </div>
+
+      <section
+        className="rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm shadow-sm"
+        aria-labelledby="workflow-shortcuts-heading"
+        data-testid="document-workflow-shortcuts"
+      >
+        <h2
+          id="workflow-shortcuts-heading"
+          className="text-xs font-black uppercase tracking-wide text-blue-950 mb-1.5 flex items-center gap-2"
+        >
+          <ListChecks size={14} className="text-blue-700 shrink-0" aria-hidden />
+          This case elsewhere
+        </h2>
+        <p className="text-[11px] text-blue-950/90 leading-relaxed mb-2.5">
+          These shortcuts stay here if you leave and come back. <strong>Review queue</strong> shows all
+          documents; <strong>Consultation</strong> and <strong>Response</strong> jump to{' '}
+          <span className="font-mono text-[10px] bg-white/80 px-1 rounded border border-blue-100/80">
+            {doc.id.slice(0, 8)}…
+          </span>{' '}
+          in those apps (same case).
+        </p>
+        <WorkflowDocConnections docId={doc.id} current="document" />
+      </section>
+
+      {flash && (
+        <div
+          ref={flashBannerRef}
+          className={`rounded-xl border px-4 py-3 text-sm font-medium flex items-start gap-3 ${
+            flash.tone === 'success'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+              : 'border-red-200 bg-red-50 text-red-900'
+          }`}
+          role="status"
+          aria-live="polite"
+          data-testid={`document-flash-${flash.tone}`}
+        >
+          {flash.tone === 'success' ? (
+            <CheckCircle2 size={18} className="text-emerald-600 shrink-0 mt-0.5" />
+          ) : (
+            <AlertTriangle size={18} className="text-red-600 shrink-0 mt-0.5" />
+          )}
+          <div className="flex-1 min-w-0 space-y-2">
+            <p>{flash.message}</p>
+            {flash.link && (
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  to={flash.link.to}
+                  data-testid="document-flash-follow-link"
+                  className="inline-flex items-center rounded-lg border border-emerald-400 bg-white px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-emerald-900 hover:bg-emerald-100"
+                >
+                  {flash.link.label}
+                </Link>
+                {flash.link.hint && (
+                  <span className="text-[11px] text-emerald-800/90">{flash.link.hint}</span>
+                )}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            className="text-xs font-bold uppercase tracking-wider opacity-60 hover:opacity-100 shrink-0"
+            onClick={() => setFlash(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      <OrphanedConsultationBanner doc={doc} />
+      <NoAssignedDepartmentBanner doc={doc} />
 
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
@@ -308,7 +461,13 @@ function DocumentDetailInner({ id }: { id: string }) {
                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">File metadata</p>
                   <p><span className="font-semibold text-slate-700">Name:</span> {primaryFile.original_filename}</p>
                   <p><span className="font-semibold text-slate-700">MIME:</span> {primaryFile.mime_type}</p>
-                  <p><span className="font-semibold text-slate-700">Size:</span> {primaryFile.size_bytes} bytes</p>
+                  <p data-testid="file-size">
+                    <span className="font-semibold text-slate-700">Size:</span>{' '}
+                    {formatBytes(primaryFile.size_bytes)}
+                    <span className="text-xs text-slate-400 ml-2">
+                      ({primaryFile.size_bytes.toLocaleString()} bytes)
+                    </span>
+                  </p>
                   {primaryFile.sha256 && (
                     <p className="font-mono text-xs break-all">
                       <span className="font-semibold text-slate-700 font-sans">SHA-256:</span> {primaryFile.sha256}
@@ -425,11 +584,37 @@ function DocumentDetailInner({ id }: { id: string }) {
 
           {/* Consultation Notes */}
           {hasConsultationThread && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <MessageSquare size={18} className="text-purple-600" /> Consultation thread
-                </CardTitle>
+            <Card data-testid="consultation-thread-card">
+              <CardHeader className="border-b border-slate-100 pb-4 space-y-3">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <MessageSquare size={18} className="text-purple-600" /> Consultation thread
+                  </CardTitle>
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <Link
+                      to={`/consultation?doc=${doc.id}`}
+                      data-testid="consultation-thread-full-view-link"
+                      className="inline-flex items-center rounded-lg border border-purple-300 bg-purple-50 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-purple-900 hover:bg-purple-100"
+                    >
+                      Open consultation page
+                    </Link>
+                    <Link
+                      to={`/review?doc=${doc.id}`}
+                      data-testid="consultation-thread-review-queue-link"
+                      className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-700 hover:bg-slate-100"
+                    >
+                      Review queue
+                    </Link>
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  The same messages appear here and on the{' '}
+                  <Link to="/consultation" className="font-semibold text-purple-700 underline-offset-2 hover:underline">
+                    Internal Consultation
+                  </Link>{' '}
+                  page (chat-style layout). Use <span className="font-semibold">Review queue</span> to find this case
+                  alongside other documents.
+                </p>
               </CardHeader>
               <CardContent className="space-y-4">
                 {doc.consultation_notes.length > 0 ? (
@@ -495,244 +680,134 @@ function DocumentDetailInner({ id }: { id: string }) {
 
         {/* Sidebar — Workflow Actions */}
         <div className="space-y-6">
-          <Card>
+          <WorkflowPipeline
+            status={doc.status}
+            hadConsultationActivity={
+              doc.consultation_notes.length > 0 || doc.status === 'in_consultation'
+            }
+          />
+
+          <Card data-testid="workflow-actions-panel">
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
                 <Shield size={18} className="text-slate-700" /> Workflow actions
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Status-aware helper text */}
-              <p className="text-sm text-slate-500 leading-relaxed">
-                {getWorkflowStatusMessage(doc.status)}
-              </p>
+              <RoutingDecisionCallout
+                decisions={doc.routing_decisions}
+                displayDepartment={displayDepartment}
+              />
+              <WorkflowContext
+                status={doc.status}
+                role={role}
+                roleId={roleId}
+                terminal={terminal}
+                hasAvailableActions={actionStates.available.length > 0}
+              />
 
               {terminal ? (
                 <TerminalStateCard status={doc.status} />
-              ) : visibleActions.length === 0 ? (
-                <p className="text-sm text-slate-400 italic py-4 text-center">
-                  No workflow actions are currently available for your role.
-                </p>
+              ) : actionStates.available.length === 0 && actionStates.disabled.length === 0 ? (
+                <div
+                  className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-600 leading-relaxed"
+                  data-testid="workflow-empty"
+                >
+                  <p className="font-semibold text-slate-700">No actions for your role on this document.</p>
+                  <p className="mt-1 text-xs text-slate-500">{getNextStepHint(doc, roleId)}</p>
+                </div>
               ) : (
-                actionGroupKeys.map((groupKey) => {
-                  const groupItems = visibleActions.filter((v) => v.action.group === groupKey);
-                  if (groupItems.length === 0) return null;
+                <>
+                  {/* Primary "next step" actions — the forward action (if any) is
+                      promoted above alternatives so the user always knows which
+                      button advances the pipeline. */}
+                  {actionStates.available.length > 0 && (() => {
+                    // Hide supervisor-self-escalate noise, then partition
+                    const filtered = actionStates.available.filter((a) => {
+                      if (a.id === 'escalate' && roleId === 'supervisor') return false;
+                      return true;
+                    });
+                    const { forward, alternatives } = partitionByForwardness(
+                      filtered,
+                      doc,
+                      roleId,
+                    );
+                    const renderOne = (action: typeof filtered[number]) =>
+                      renderActionControl({
+                        action,
+                        isAvailable: true,
+                        reason: null,
+                        getActionIcon,
+                        showRerouteInput,
+                        setShowRerouteInput,
+                        rerouteDepartmentId,
+                        setRerouteDepartmentId,
+                        rerouteRationale,
+                        setRerouteRationale,
+                        availableDepartments,
+                        showConsultInput,
+                        setShowConsultInput,
+                        consultBody,
+                        setConsultBody,
+                        handleAction,
+                        actionLoading,
+                        doc,
+                      });
+                    return (
+                      <div className="space-y-4" data-testid="workflow-available-actions">
+                        {forward && (
+                          <div className="space-y-2" data-testid="workflow-forward-action">
+                            <div className="flex items-center gap-2">
+                              <Sparkles size={12} className="text-emerald-600" />
+                              <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700">
+                                Recommended next step
+                              </p>
+                            </div>
+                            <p className="text-xs text-slate-600 leading-relaxed">
+                              {forwardExplanation(forward.id)}
+                            </p>
+                            {renderOne(forward)}
+                          </div>
+                        )}
 
-                  const hasAvailable = groupItems.some((v) => v.available);
-                  return (
-                    <div key={groupKey} className="space-y-2">
-                      <p className={`text-[10px] font-black uppercase tracking-widest ${hasAvailable ? 'text-slate-400' : 'text-slate-300'}`}>
-                        {ACTION_GROUP_LABELS[groupKey]}
-                      </p>
-                      {groupItems.map(({ action, available: isAvailable, reason }) => {
-                        const icon = getActionIcon(action.id);
-                        const btnVariant: ButtonVariant = toButtonVariant(action.variant);
+                        {alternatives.length > 0 && (
+                          <div
+                            className="space-y-2 pt-1 border-t border-slate-100"
+                            data-testid="workflow-alternative-actions"
+                          >
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                              {forward ? 'Or, alternatives' : 'Available actions'}
+                            </p>
+                            <div className="space-y-2">
+                              {alternatives.map((a) => renderOne(a))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
-                        // --- Special: reroute inline form ---
-                        if (action.id === 'reroute') {
-                          if (isAvailable) {
-                            return (
-                              <div key={action.id} className="space-y-2">
-                                {!showRerouteInput ? (
-                                  <ActionButton
-                                    label={action.label}
-                                    icon={icon}
-                                    onClick={() => {
-                                      setRerouteDepartmentId('');
-                                      setRerouteRationale('');
-                                      setShowRerouteInput(true);
-                                    }}
-                                    disabled={actionLoading}
-                                    available={true}
-                                    variant={btnVariant}
-                                  />
-                                ) : (
-                                  <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 space-y-3">
-                                    <div className="space-y-1">
-                                      <label htmlFor="reroute-department" className="text-xs font-bold text-slate-600">
-                                        Reassign department
-                                      </label>
-                                      <select
-                                        id="reroute-department"
-                                        value={rerouteDepartmentId}
-                                        onChange={(e) => setRerouteDepartmentId(e.target.value)}
-                                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                                      >
-                                        <option value="">Select a department...</option>
-                                        {availableDepartments.map((department) => (
-                                          <option key={department.id} value={department.id}>
-                                            {department.name}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </div>
-                                    <div className="space-y-1">
-                                      <label htmlFor="reroute-rationale" className="text-xs font-bold text-slate-600">
-                                        Rationale
-                                      </label>
-                                      <textarea
-                                        id="reroute-rationale"
-                                        value={rerouteRationale}
-                                        onChange={(e) => setRerouteRationale(e.target.value)}
-                                        placeholder="Explain why the document should be reassigned..."
-                                        rows={3}
-                                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-                                      />
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                      <button
-                                        type="button"
-                                        disabled={actionLoading || !rerouteDepartmentId}
-                                        onClick={() => {
-                                          handleAction('reroute', {
-                                            department_id: rerouteDepartmentId,
-                                            rationale: rerouteRationale.trim(),
-                                          });
-                                          setRerouteDepartmentId('');
-                                          setRerouteRationale('');
-                                          setShowRerouteInput(false);
-                                        }}
-                                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                                      >
-                                        {actionLoading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
-                                        Confirm reroute
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setShowRerouteInput(false);
-                                          setRerouteDepartmentId('');
-                                          setRerouteRationale('');
-                                        }}
-                                        className="px-3 py-2 text-slate-500 hover:text-slate-700 text-sm font-medium rounded-xl hover:bg-slate-100 transition"
-                                      >
-                                        Cancel
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          }
+                  {/* Progression actions available to other roles — only shown
+                      when the current role itself has no forward action (i.e.
+                      the user genuinely needs to hand off to another role). */}
+                  {getForwardActionId(doc, roleId) === null && (
+                    <OtherRolesActions
+                      doc={doc}
+                      currentRoleId={roleId}
+                      onSwitchRole={(targetId) => {
+                        setRole(toFrontendRoleLabel(targetId) as typeof role);
+                      }}
+                    />
+                  )}
 
-                          return (
-                            <DisabledActionWrapper key={action.id} reason={reason}>
-                              <ActionButton
-                                label={action.label}
-                                icon={icon}
-                                onClick={() => {}}
-                                disabled={true}
-                                available={false}
-                                variant={btnVariant}
-                              />
-                            </DisabledActionWrapper>
-                          );
-                        }
-
-                        // --- Special: request-consultation inline form ---
-                        if (action.id === 'request-consultation') {
-                          if (isAvailable) {
-                            return (
-                              <div key={action.id} className="space-y-2">
-                                {!showConsultInput ? (
-                                  <ActionButton
-                                    label={action.label}
-                                    icon={icon}
-                                    onClick={() => setShowConsultInput(true)}
-                                    disabled={actionLoading}
-                                    available={true}
-                                    variant={btnVariant}
-                                  />
-                                ) : (
-                                  <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3 space-y-2">
-                                    <textarea
-                                      value={consultBody}
-                                      onChange={(e) => setConsultBody(e.target.value)}
-                                      placeholder="Describe what you need consulted on..."
-                                      rows={3}
-                                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 outline-none resize-none"
-                                    />
-                                    <div className="flex items-center gap-2">
-                                      <button
-                                        type="button"
-                                        disabled={actionLoading || !consultBody.trim()}
-                                        onClick={() => {
-                                          handleAction('request-consultation', { target_role: 'consultant', body: consultBody });
-                                          setConsultBody('');
-                                          setShowConsultInput(false);
-                                        }}
-                                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-xl font-bold text-sm hover:bg-amber-700 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                                      >
-                                        {actionLoading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
-                                        Send
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => { setShowConsultInput(false); setConsultBody(''); }}
-                                        className="px-3 py-2 text-slate-500 hover:text-slate-700 text-sm font-medium rounded-xl hover:bg-slate-100 transition"
-                                      >
-                                        Cancel
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          }
-                          // Disabled state
-                          return (
-                            <DisabledActionWrapper key={action.id} reason={reason}>
-                              <ActionButton
-                                label={action.label}
-                                icon={icon}
-                                onClick={() => {}}
-                                disabled={true}
-                                available={false}
-                                variant={btnVariant}
-                              />
-                            </DisabledActionWrapper>
-                          );
-                        }
-
-                        // --- Special: resolve-consultation (auto-select note) ---
-                        if (action.id === 'resolve-consultation') {
-                          return (
-                            <DisabledActionWrapper key={action.id} reason={!isAvailable ? reason : null}>
-                              <ActionButton
-                                label={action.label}
-                                icon={icon}
-                                onClick={() => {
-                                  const unresolved = doc.consultation_notes.filter((n) => n.resolved_at === null);
-                                  const mostRecent = unresolved[unresolved.length - 1];
-                                  if (mostRecent) {
-                                    handleAction('resolve-consultation', { note_id: mostRecent.id });
-                                  }
-                                }}
-                                disabled={actionLoading || !isAvailable}
-                                available={isAvailable}
-                                variant={btnVariant}
-                              />
-                            </DisabledActionWrapper>
-                          );
-                        }
-
-                        // --- Default action rendering ---
-                        return (
-                          <DisabledActionWrapper key={action.id} reason={!isAvailable ? reason : null}>
-                            <ActionButton
-                              label={action.label}
-                              icon={icon}
-                              onClick={() => handleAction(action.id)}
-                              disabled={actionLoading || !isAvailable}
-                              available={isAvailable}
-                              variant={btnVariant}
-                            />
-                          </DisabledActionWrapper>
-                        );
-                      })}
-                    </div>
-                  );
-                })
+                  {/* Disabled actions — role allows them, but status doesn't */}
+                  {actionStates.disabled.length > 0 && (
+                    <DisabledActionsDisclosure
+                      disabled={actionStates.disabled}
+                      getActionIcon={getActionIcon}
+                    />
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
@@ -1044,6 +1119,58 @@ function humanizeEnum(value: unknown): string {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function forwardExplanation(actionId: string): string {
+  switch (actionId) {
+    case 'approve-routing':
+      return 'Accept the AI-suggested routing and move the document into active review.';
+    case 'approve':
+      return 'Record formal approval — after this, a Supervisor can close the document to archive it.';
+    case 'close':
+      return 'Archive the approved document and end the workflow.';
+    case 'resolve-consultation':
+      return 'Mark the consultation note as resolved so the document can continue.';
+    case 'reroute':
+      return 'Pick a department to own this document before it can progress further.';
+    default:
+      return 'This is the action that most advances the workflow right now.';
+  }
+}
+
+function actionSuccessMessage(
+  action: string,
+  payload: Record<string, string>,
+  departments: Array<{ id: string; name: string }>,
+): string {
+  const deptName = (id: string | undefined) => {
+    if (!id) return '';
+    return departments.find((d) => d.id === id)?.name ?? humanizeEnum(id);
+  };
+  switch (action) {
+    case 'approve-routing':
+      return 'Routing approved. Document is now under review.';
+    case 'approve':
+      return 'Document approved. A Supervisor can now close it to archive.';
+    case 'reroute': {
+      const name = deptName(payload.department_id);
+      return name ? `Document rerouted to ${name}.` : 'Document rerouted.';
+    }
+    case 'escalate':
+      return 'Document escalated to supervisor.';
+    case 'mark-out-of-scope':
+      return 'Document marked out of scope.';
+    case 'close':
+      return 'Document closed.';
+    case 'request-consultation':
+      return 'Consultation requested — the consultant can reply from the Consultation page or in the thread below.';
+    case 'resolve-consultation':
+      return 'Consultation resolved.';
+    case 'analyze':
+      return 'AI analysis complete.';
+    default:
+      return 'Action completed successfully.';
+  }
+}
+
 function ActionButton({
   label,
   icon,
@@ -1097,6 +1224,592 @@ function DisabledActionWrapper({ reason, children }: { reason: string | null; ch
     <div className="space-y-1">
       {children}
       {reason && <p className="text-[10px] text-slate-400 px-1">{reason}</p>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Workflow guide — visual pipeline + role context + disabled-actions disclosure
+// ---------------------------------------------------------------------------
+
+function WorkflowPipeline({
+  status,
+  hadConsultationActivity,
+}: {
+  status: string;
+  hadConsultationActivity: boolean;
+}) {
+  const terminal = isTerminalStatus(status);
+
+  return (
+    <Card data-testid="workflow-pipeline">
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <ScrollText size={18} className="text-slate-700" /> Workflow progress
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ol className="space-y-2">
+          {PIPELINE_STAGES.map((stage, idx) => {
+            const stepState = getPipelineStepState(status, idx, {
+              hadConsultationActivity,
+            });
+            const done = stepState === 'done';
+            const active = stepState === 'active';
+            const icon = done ? (
+              <CheckCircle2 size={16} className="text-emerald-600" />
+            ) : active ? (
+              <Circle size={16} className="text-blue-600 fill-blue-100" />
+            ) : (
+              <Circle size={16} className="text-slate-300" />
+            );
+            return (
+              <li
+                key={stage.id}
+                className={`flex items-start gap-3 rounded-lg px-2 py-1.5 ${
+                  active ? 'bg-blue-50' : ''
+                }`}
+                data-testid={`pipeline-stage-${stage.id}`}
+                data-status={stepState}
+              >
+                <div className="mt-0.5 shrink-0">{icon}</div>
+                <div className="flex-1">
+                  <p
+                    className={`text-xs font-bold ${
+                      active ? 'text-blue-800' : done ? 'text-slate-700' : 'text-slate-400'
+                    }`}
+                  >
+                    {stage.label}
+                  </p>
+                  <p className={`text-[11px] ${active ? 'text-blue-700' : 'text-slate-400'}`}>
+                    {stage.description}
+                  </p>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+        {terminal && (
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
+            <span className="font-bold">Terminal state:</span> {status.replace(/_/g, ' ')}. No
+            further workflow actions are possible.
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function WorkflowContext({
+  status,
+  role,
+  roleId,
+  terminal,
+  hasAvailableActions,
+}: {
+  status: string;
+  role: string;
+  roleId: Role;
+  terminal: boolean;
+  hasAvailableActions: boolean;
+}) {
+  const responsible = getResponsibleRoles(status);
+  const hint = getNextStepHint(status, roleId);
+  const statusMessage = getWorkflowStatusMessage(status);
+  const needsOtherRole =
+    !terminal && !hasAvailableActions && responsible.length > 0 && !responsible.includes(roleId);
+
+  return (
+    <div className="space-y-3" data-testid="workflow-context">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 border border-blue-200 px-2.5 py-1 font-bold text-blue-800">
+          <UserCheck size={12} /> Acting as {role}
+        </span>
+        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 border border-slate-200 px-2.5 py-1 font-bold text-slate-700 capitalize">
+          Status: {status.replace(/_/g, ' ')}
+        </span>
+      </div>
+
+      {statusMessage && (
+        <p className="text-sm text-slate-600 leading-relaxed">{statusMessage}</p>
+      )}
+
+      {!terminal && hint && (
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+          <span className="font-bold text-slate-700">What happens next: </span>
+          {hint}
+        </div>
+      )}
+
+      {needsOtherRole && (
+        <div
+          className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-900"
+          data-testid="workflow-waiting-on"
+        >
+          <p className="font-bold">Waiting on another role</p>
+          <p>
+            Your current role ({role}) cannot act on this status. Switch to{' '}
+            {responsible.map((r, i) => (
+              <span key={r}>
+                <span className="font-semibold">{ROLE_LABEL[r]}</span>
+                {i < responsible.length - 1 ? ' or ' : ''}
+              </span>
+            ))}
+            {' '}to continue.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NoAssignedDepartmentBanner({ doc }: { doc: DocDetail }) {
+  // A document that's been opened for review but never got a department
+  // assignment is stuck in limbo: the forward-action heuristic recommends
+  // rerouting (see workflow-actions.ts), but users need a clear visual
+  // cue that the current owner is literally nobody.
+  if (doc.assigned_department_id) return null;
+  // Only surface once the doc has progressed past intake/AI stages.
+  const relevantStatuses = new Set(['routed', 'under_review', 'in_consultation']);
+  if (!relevantStatuses.has(doc.status)) return null;
+  return (
+    <div
+      role="alert"
+      data-testid="no-assigned-department-warning"
+      className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+    >
+      <AlertTriangle size={18} className="text-amber-600 shrink-0 mt-0.5" />
+      <div className="flex-1 space-y-1">
+        <p className="font-bold">No department assigned to this document</p>
+        <p className="text-xs text-amber-800">
+          The document is <span className="font-semibold">{humanizeEnum(doc.status)}</span>
+          {' '}but has no owning department. Use{' '}
+          <span className="font-semibold">Reroute document</span> below to pick a
+          department before approving or closing.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function OrphanedConsultationBanner({ doc }: { doc: DocDetail }) {
+  // If the document is already on `in_consultation` the normal consultation
+  // thread UI covers it — no extra warning needed.
+  if (doc.status === 'in_consultation') return null;
+
+  const openNotes = doc.consultation_notes.filter((n) => !n.resolved_at);
+  if (openNotes.length === 0) return null;
+
+  // Any non-`in_consultation` status with open notes is a data-drift
+  // situation caused by the pre-fix `resolve-consultation` bug (see
+  // FEEDBACK-13). Warn the user and deep-link them to the consultation
+  // thread so they can finish resolving.
+  const count = openNotes.length;
+  return (
+    <div
+      role="alert"
+      data-testid="orphaned-consultation-warning"
+      className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+    >
+      <AlertTriangle size={18} className="text-amber-600 shrink-0 mt-0.5" />
+      <div className="flex-1 space-y-1">
+        <p className="font-bold">
+          {count} unresolved consultation note{count === 1 ? '' : 's'} on this document
+        </p>
+        <p className="text-xs text-amber-800">
+          The document is currently <span className="font-semibold">{humanizeEnum(doc.status)}</span>
+          {' '}but still has open consultation note{count === 1 ? '' : 's'}. Resolve{' '}
+          {count === 1 ? 'it' : 'them all'} before approving or closing this document.
+        </p>
+      </div>
+      <Link
+        to={`/consultation?doc=${doc.id}`}
+        data-testid="orphaned-consultation-link"
+        className="shrink-0 rounded-lg border border-amber-400 bg-white px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-amber-800 hover:bg-amber-100"
+      >
+        Open consultation thread
+      </Link>
+    </div>
+  );
+}
+
+function RoutingDecisionCallout({
+  decisions,
+  displayDepartment,
+}: {
+  decisions: RoutingDecision[];
+  displayDepartment: (value: string) => string;
+}) {
+  if (!decisions || decisions.length === 0) return null;
+  const latest = [...decisions].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  )[0];
+  const final = latest.final_department_id;
+  const decisionLabel = latest.decision === 'rerouted' ? 'Rerouted' : humanizeEnum(latest.decision);
+  const when = new Date(latest.created_at).toLocaleString();
+  const who = latest.decided_by_role
+    ? humanizeEnum(latest.decided_by_role)
+    : 'AI analysis';
+  return (
+    <div
+      className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-3 py-3 space-y-1.5"
+      data-testid="latest-routing-decision"
+    >
+      <div className="flex items-center gap-2 text-xs">
+        <Send size={14} className="text-emerald-700" />
+        <span className="text-[10px] font-black uppercase tracking-widest text-emerald-700">
+          Latest routing
+        </span>
+        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-800">
+          {decisionLabel}
+        </span>
+      </div>
+      <p className="text-sm text-slate-800">
+        {final ? (
+          <>
+            Assigned to{' '}
+            <span className="font-bold text-emerald-900">{displayDepartment(final)}</span>
+          </>
+        ) : (
+          <span className="italic text-slate-500">No final department recorded</span>
+        )}
+      </p>
+      {latest.rationale && (
+        <p className="text-xs text-slate-600 italic">&quot;{latest.rationale}&quot;</p>
+      )}
+      <p className="text-[10px] text-slate-500">
+        by {who} · {when}
+      </p>
+    </div>
+  );
+}
+
+function OtherRolesActions({
+  doc,
+  currentRoleId,
+  onSwitchRole,
+}: {
+  doc: DocDetail;
+  currentRoleId: Role;
+  onSwitchRole: (roleId: Role) => void;
+}) {
+  const groups = getActionsAvailableForOtherRoles(
+    {
+      status: doc.status,
+      analyses: doc.analyses,
+      consultation_notes: doc.consultation_notes,
+      assigned_department_id: doc.assigned_department_id,
+    },
+    currentRoleId,
+  );
+  if (groups.length === 0) return null;
+
+  return (
+    <div
+      className="space-y-2 rounded-xl border border-blue-100 bg-blue-50/40 p-3"
+      data-testid="other-roles-actions"
+    >
+      <p className="text-[10px] font-black uppercase tracking-widest text-blue-700 flex items-center gap-1">
+        <UserCheck size={12} /> Next owner(s) for this document
+      </p>
+      <p className="text-xs text-slate-600 leading-relaxed">
+        To progress further, switch to another role:
+      </p>
+      <div className="space-y-2">
+        {groups.map(({ role: targetRole, forward }) => (
+          <div key={targetRole} className="rounded-lg bg-white border border-slate-200 p-2 space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-bold text-slate-800">{ROLE_LABEL[targetRole]}</p>
+              <button
+                type="button"
+                onClick={() => onSwitchRole(targetRole)}
+                data-testid={`switch-to-${targetRole}`}
+                className="text-[10px] font-bold uppercase tracking-wider text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 rounded-md px-2 py-1 transition"
+              >
+                Switch role
+              </button>
+            </div>
+            {forward && (
+              <p className="text-xs text-slate-600">
+                Can <span className="font-semibold text-slate-800">{forward.label}</span>
+                {' '}to move the workflow forward.
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+type ActionControlParams = {
+  action: { id: string; label: string; variant: 'default' | 'success' | 'caution' | 'destructive' };
+  isAvailable: boolean;
+  reason: string | null;
+  getActionIcon: (id: string) => React.ReactNode;
+  showRerouteInput: boolean;
+  setShowRerouteInput: (v: boolean) => void;
+  rerouteDepartmentId: string;
+  setRerouteDepartmentId: (v: string) => void;
+  rerouteRationale: string;
+  setRerouteRationale: (v: string) => void;
+  availableDepartments: Array<{ id: string; name: string }>;
+  showConsultInput: boolean;
+  setShowConsultInput: (v: boolean) => void;
+  consultBody: string;
+  setConsultBody: (v: string) => void;
+  handleAction: (action: string, payload?: Record<string, string>) => void | Promise<void>;
+  actionLoading: boolean;
+  doc: { consultation_notes: Array<{ id: string; resolved_at: string | null }> };
+};
+
+function renderActionControl(p: ActionControlParams): React.ReactNode {
+  const {
+    action,
+    isAvailable,
+    reason,
+    getActionIcon,
+    showRerouteInput,
+    setShowRerouteInput,
+    rerouteDepartmentId,
+    setRerouteDepartmentId,
+    rerouteRationale,
+    setRerouteRationale,
+    availableDepartments,
+    showConsultInput,
+    setShowConsultInput,
+    consultBody,
+    setConsultBody,
+    handleAction,
+    actionLoading,
+    doc,
+  } = p;
+  const icon = getActionIcon(action.id);
+  const btnVariant: ButtonVariant = toButtonVariant(action.variant);
+
+  if (action.id === 'reroute') {
+    if (isAvailable) {
+      return (
+        <div key={action.id} className="space-y-2">
+          {!showRerouteInput ? (
+            <ActionButton
+              label={action.label}
+              icon={icon}
+              onClick={() => {
+                setRerouteDepartmentId('');
+                setRerouteRationale('');
+                setShowRerouteInput(true);
+              }}
+              disabled={actionLoading}
+              available
+              variant={btnVariant}
+            />
+          ) : (
+            <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 space-y-3">
+              <div className="space-y-1">
+                <label htmlFor="reroute-department" className="text-xs font-bold text-slate-600">
+                  Reassign department
+                </label>
+                <select
+                  id="reroute-department"
+                  value={rerouteDepartmentId}
+                  onChange={(e) => setRerouteDepartmentId(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  <option value="">Select a department...</option>
+                  {availableDepartments.map((department) => (
+                    <option key={department.id} value={department.id}>
+                      {department.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="reroute-rationale" className="text-xs font-bold text-slate-600">
+                  Rationale
+                </label>
+                <textarea
+                  id="reroute-rationale"
+                  value={rerouteRationale}
+                  onChange={(e) => setRerouteRationale(e.target.value)}
+                  placeholder="Explain why the document should be reassigned..."
+                  rows={3}
+                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={actionLoading || !rerouteDepartmentId}
+                  onClick={() => {
+                    handleAction('reroute', {
+                      department_id: rerouteDepartmentId,
+                      rationale: rerouteRationale.trim(),
+                    });
+                    setRerouteDepartmentId('');
+                    setRerouteRationale('');
+                    setShowRerouteInput(false);
+                  }}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {actionLoading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
+                  Confirm reroute
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowRerouteInput(false);
+                    setRerouteDepartmentId('');
+                    setRerouteRationale('');
+                  }}
+                  className="px-3 py-2 text-slate-500 hover:text-slate-700 text-sm font-medium rounded-xl hover:bg-slate-100 transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+    return (
+      <DisabledActionWrapper key={action.id} reason={reason}>
+        <ActionButton label={action.label} icon={icon} onClick={() => {}} disabled available={false} variant={btnVariant} />
+      </DisabledActionWrapper>
+    );
+  }
+
+  if (action.id === 'request-consultation') {
+    if (isAvailable) {
+      return (
+        <div key={action.id} className="space-y-2">
+          {!showConsultInput ? (
+            <ActionButton
+              label={action.label}
+              icon={icon}
+              onClick={() => setShowConsultInput(true)}
+              disabled={actionLoading}
+              available
+              variant={btnVariant}
+            />
+          ) : (
+            <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3 space-y-2">
+              <textarea
+                value={consultBody}
+                onChange={(e) => setConsultBody(e.target.value)}
+                placeholder="Describe what you need consulted on..."
+                rows={3}
+                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 outline-none resize-none"
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={actionLoading || !consultBody.trim()}
+                  onClick={() => {
+                    handleAction('request-consultation', { target_role: 'consultant', body: consultBody });
+                    setConsultBody('');
+                    setShowConsultInput(false);
+                  }}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-xl font-bold text-sm hover:bg-amber-700 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {actionLoading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
+                  Send
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowConsultInput(false);
+                    setConsultBody('');
+                  }}
+                  className="px-3 py-2 text-slate-500 hover:text-slate-700 text-sm font-medium rounded-xl hover:bg-slate-100 transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+    return (
+      <DisabledActionWrapper key={action.id} reason={reason}>
+        <ActionButton label={action.label} icon={icon} onClick={() => {}} disabled available={false} variant={btnVariant} />
+      </DisabledActionWrapper>
+    );
+  }
+
+  if (action.id === 'resolve-consultation') {
+    return (
+      <DisabledActionWrapper key={action.id} reason={!isAvailable ? reason : null}>
+        <ActionButton
+          label={action.label}
+          icon={icon}
+          onClick={() => {
+            const unresolved = doc.consultation_notes.filter((n) => n.resolved_at === null);
+            const mostRecent = unresolved[unresolved.length - 1];
+            if (mostRecent) {
+              handleAction('resolve-consultation', { note_id: mostRecent.id });
+            }
+          }}
+          disabled={actionLoading || !isAvailable}
+          available={isAvailable}
+          variant={btnVariant}
+        />
+      </DisabledActionWrapper>
+    );
+  }
+
+  return (
+    <DisabledActionWrapper key={action.id} reason={!isAvailable ? reason : null}>
+      <ActionButton
+        label={action.label}
+        icon={icon}
+        onClick={() => handleAction(action.id)}
+        disabled={actionLoading || !isAvailable}
+        available={isAvailable}
+        variant={btnVariant}
+      />
+    </DisabledActionWrapper>
+  );
+}
+
+function DisabledActionsDisclosure({
+  disabled,
+  getActionIcon,
+}: {
+  disabled: Array<{ action: { id: string; label: string; variant: 'default' | 'success' | 'caution' | 'destructive' }; reason: string }>;
+  getActionIcon: (id: string) => React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-t border-slate-100 pt-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between gap-2 text-xs font-bold text-slate-500 hover:text-slate-700 transition"
+        data-testid="workflow-disabled-toggle"
+      >
+        <span className="flex items-center gap-1">
+          {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          Actions not available right now ({disabled.length})
+        </span>
+      </button>
+      {open && (
+        <ul className="mt-3 space-y-2" data-testid="workflow-disabled-list">
+          {disabled.map(({ action, reason }) => (
+            <li
+              key={action.id}
+              className="flex items-start gap-2 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2"
+            >
+              <div className="mt-0.5 shrink-0 text-slate-400">{getActionIcon(action.id)}</div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold text-slate-600">{action.label}</p>
+                <p className="text-[11px] text-slate-500">{reason}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

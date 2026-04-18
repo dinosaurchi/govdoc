@@ -118,6 +118,22 @@ class TestRBACMatrix:
         )
         assert resp.status_code == 403
 
+    @pytest.mark.parametrize("role", ["intake_clerk", "consultant"])
+    def test_approve_denied(self, client, sample_doc_id, role):
+        resp = client.post(
+            f"/api/v1/documents/{sample_doc_id}/approve",
+            headers={"X-GovDoc-Role": role},
+        )
+        assert resp.status_code == 403
+
+    @pytest.mark.parametrize("role", ["reviewer", "supervisor"])
+    def test_approve_allowed_not_403(self, client, sample_doc_id, role):
+        resp = client.post(
+            f"/api/v1/documents/{sample_doc_id}/approve",
+            headers={"X-GovDoc-Role": role},
+        )
+        assert resp.status_code != 403
+
     @pytest.mark.parametrize("role", ["intake_clerk", "reviewer"])
     def test_demo_reset_denied(self, client, role):
         resp = client.post(

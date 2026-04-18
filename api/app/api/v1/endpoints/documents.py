@@ -18,14 +18,26 @@ router = APIRouter()
 
 @router.get("/", response_model=List[DocumentListOut])
 def get_documents(
+    response: Response,
     status: Optional[str] = None,
     department_id: Optional[str] = None,
     q: Optional[str] = None,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(deps.get_db),
     role: CurrentRole = Depends(deps.get_current_role),
 ):
     repo = DocumentRepository(db)
-    docs = repo.list(status=status, department_id=department_id, q=q)
+    total = repo.count(status=status, department_id=department_id, q=q)
+    docs = repo.list(
+        status=status,
+        department_id=department_id,
+        q=q,
+        offset=offset,
+        limit=limit,
+    )
+    response.headers["X-Total-Count"] = str(total)
+    response.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
     return docs
 
 

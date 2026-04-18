@@ -2,7 +2,11 @@
 
 from typing import Any
 
-from app.repositories import document as doc_repo
+from app.repositories.document import (
+    document as doc_repo_document,
+    consultation_note as doc_repo_consultation_note,
+    routing_decision as doc_repo_routing_decision,
+)
 from app.models.document import DocumentStatus
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
@@ -95,7 +99,7 @@ class WorkflowService:
         event_type: str = "WORKFLOW_TRANSITION",
         metadata_json: dict[str, Any] | None = None,
     ):
-        doc = doc_repo.document.get(self.db, id=document_id)
+        doc = doc_repo_document.get(self.db, id=document_id)
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
 
@@ -123,11 +127,11 @@ class WorkflowService:
         return doc
 
     async def add_consultation(self, document_id: str, author_role: str, body: str):
-        doc = doc_repo.document.get(self.db, id=document_id)
+        doc = doc_repo_document.get(self.db, id=document_id)
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
 
-        note = doc_repo.consultation_note.create(
+        note = doc_repo_consultation_note.create(
             self.db,
             obj_in={
                 "document_id": document_id,
@@ -144,7 +148,7 @@ class WorkflowService:
             metadata_json={"note_id": note.id},
         )
 
-        doc = doc_repo.document.get(self.db, id=document_id)
+        doc = doc_repo_document.get(self.db, id=document_id)
         if doc and doc.status == DocumentStatus.under_review:
             await self.transition_state(
                 document_id,
@@ -172,11 +176,11 @@ class WorkflowService:
         decision: str,
         rationale: str | None = None,
     ):
-        doc = doc_repo.document.get(self.db, id=document_id)
+        doc = doc_repo_document.get(self.db, id=document_id)
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
 
-        routing_decision = doc_repo.routing_decision.create(
+        routing_decision = doc_repo_routing_decision.create(
             self.db,
             obj_in={
                 "document_id": document_id,
