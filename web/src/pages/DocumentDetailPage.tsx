@@ -24,6 +24,7 @@ import {
   UserCheck,
   Sparkles,
   Building2,
+  ListChecks,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { WorkflowDocConnections } from '@/components/WorkflowDocConnections';
@@ -173,9 +174,9 @@ function DocumentDetailInner({ id }: { id: string }) {
 
   useEffect(() => {
     if (!flash) return;
-    // Longer dwell when we show a follow-up link so users can click it.
-    const ms = flash.link ? 12_000 : 5000;
-    const handle = window.setTimeout(() => setFlash(null), ms);
+    // Success banners with a next-step link stay until dismissed (return visits).
+    if (flash.tone === 'success' && flash.link) return;
+    const handle = window.setTimeout(() => setFlash(null), 5000);
     return () => window.clearTimeout(handle);
   }, [flash]);
 
@@ -371,9 +372,31 @@ function DocumentDetailInner({ id }: { id: string }) {
               {doc.status.replace(/_/g, ' ')}
             </Badge>
           </div>
-          <WorkflowDocConnections docId={doc.id} current="document" />
         </div>
       </div>
+
+      <section
+        className="rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm shadow-sm"
+        aria-labelledby="workflow-shortcuts-heading"
+        data-testid="document-workflow-shortcuts"
+      >
+        <h2
+          id="workflow-shortcuts-heading"
+          className="text-xs font-black uppercase tracking-wide text-blue-950 mb-1.5 flex items-center gap-2"
+        >
+          <ListChecks size={14} className="text-blue-700 shrink-0" aria-hidden />
+          This case elsewhere
+        </h2>
+        <p className="text-[11px] text-blue-950/90 leading-relaxed mb-2.5">
+          These shortcuts stay here if you leave and come back. <strong>Review queue</strong> shows all
+          documents; <strong>Consultation</strong> and <strong>Response</strong> jump to{' '}
+          <span className="font-mono text-[10px] bg-white/80 px-1 rounded border border-blue-100/80">
+            {doc.id.slice(0, 8)}…
+          </span>{' '}
+          in those apps (same case).
+        </p>
+        <WorkflowDocConnections docId={doc.id} current="document" />
+      </section>
 
       {flash && (
         <div
