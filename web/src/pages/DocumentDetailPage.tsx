@@ -23,6 +23,7 @@ import {
   Circle,
   UserCheck,
   Sparkles,
+  Building2,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { apiGet, apiPost } from '@/lib/api';
@@ -158,6 +159,13 @@ function DocumentDetailInner({ id }: { id: string }) {
   const [rerouteDepartmentId, setRerouteDepartmentId] = useState('');
   const [rerouteRationale, setRerouteRationale] = useState('');
   const [analysisView, setAnalysisView] = useState<'rendered' | 'raw'>('rendered');
+  const [flash, setFlash] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
+
+  useEffect(() => {
+    if (!flash) return;
+    const handle = window.setTimeout(() => setFlash(null), 5000);
+    return () => window.clearTimeout(handle);
+  }, [flash]);
 
   const fetchDoc = async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
@@ -219,8 +227,10 @@ function DocumentDetailInner({ id }: { id: string }) {
         await apiPost(`/documents/${id}/analyze`, undefined, role);
       }
       await fetchDoc({ silent: true });
+      setFlash({ tone: 'success', message: actionSuccessMessage(action, payload, departments) });
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Action failed');
+      const message = err instanceof Error ? err.message : 'Action failed';
+      setFlash({ tone: 'error', message });
     } finally {
       setActionLoading(false);
     }
@@ -292,6 +302,18 @@ function DocumentDetailInner({ id }: { id: string }) {
             Created: {new Date(doc.created_at).toLocaleString()}
             {doc.issuing_agency && <> · From: {doc.issuing_agency}</>}
           </p>
+          <p
+            className="text-slate-600 text-sm font-medium flex items-center gap-1.5 mt-1"
+            data-testid="document-assigned-department"
+          >
+            <Building2 size={14} className="text-slate-400" />
+            <span className="text-slate-500">Assigned to:</span>
+            {doc.assigned_department_id ? (
+              <span className="font-bold text-slate-800">{displayDepartment(doc.assigned_department_id)}</span>
+            ) : (
+              <span className="italic text-slate-400">Not yet assigned</span>
+            )}
+          </p>
         </div>
         <div className="ml-auto">
           <Badge className="px-4 py-1 text-sm font-bold capitalize">
@@ -299,6 +321,33 @@ function DocumentDetailInner({ id }: { id: string }) {
           </Badge>
         </div>
       </div>
+
+      {flash && (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm font-medium flex items-start gap-3 ${
+            flash.tone === 'success'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+              : 'border-red-200 bg-red-50 text-red-900'
+          }`}
+          role="status"
+          aria-live="polite"
+          data-testid={`document-flash-${flash.tone}`}
+        >
+          {flash.tone === 'success' ? (
+            <CheckCircle2 size={18} className="text-emerald-600 shrink-0 mt-0.5" />
+          ) : (
+            <AlertTriangle size={18} className="text-red-600 shrink-0 mt-0.5" />
+          )}
+          <span className="flex-1">{flash.message}</span>
+          <button
+            type="button"
+            className="text-xs font-bold uppercase tracking-wider opacity-60 hover:opacity-100"
+            onClick={() => setFlash(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
@@ -897,6 +946,39 @@ function humanizeEnum(value: unknown): string {
   return text
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function actionSuccessMessage(
+  action: string,
+  payload: Record<string, string>,
+  departments: Array<{ id: string; name: string }>,
+): string {
+  const deptName = (id: string | undefined) => {
+    if (!id) return '';
+    return departments.find((d) => d.id === id)?.name ?? humanizeEnum(id);
+  };
+  switch (action) {
+    case 'approve-routing':
+      return 'Routing approved. Document is now under review.';
+    case 'reroute': {
+      const name = deptName(payload.department_id);
+      return name ? `Document rerouted to ${name}.` : 'Document rerouted.';
+    }
+    case 'escalate':
+      return 'Document escalated to supervisor.';
+    case 'mark-out-of-scope':
+      return 'Document marked out of scope.';
+    case 'close':
+      return 'Document closed.';
+    case 'request-consultation':
+      return 'Consultation requested.';
+    case 'resolve-consultation':
+      return 'Consultation resolved.';
+    case 'analyze':
+      return 'AI analysis complete.';
+    default:
+      return 'Action completed successfully.';
+  }
 }
 
 function ActionButton({
