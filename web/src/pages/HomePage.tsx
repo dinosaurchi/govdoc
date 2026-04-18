@@ -1,11 +1,10 @@
 import { useRole } from '@/hooks/use-role';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui-card';
 import { Badge } from '@/components/ui-badge';
-import { ArrowRight, CheckCircle2, Clock, AlertCircle, FileUp, ListChecks, MessageSquare, LayoutDashboard, Database, Loader2 } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Clock, AlertCircle, FileUp, ListChecks, MessageSquare, LayoutDashboard, Database, Loader2, Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useState } from 'react';
 import { apiPost } from '@/lib/api';
-import { DemoWalkthrough } from '@/components/demo-walkthrough';
 
 export default function HomePage() {
   const { role } = useRole();
@@ -35,7 +34,7 @@ export default function HomePage() {
         <p className="text-xl text-slate-600 font-medium">
           Automated document intake, AI-driven triage, and secure administrative workflow for government departments.
         </p>
-        <div className="pt-4 flex items-center justify-center gap-4">
+        <div className="pt-4 flex flex-wrap items-center justify-center gap-3">
           <button
             onClick={handleSeed}
             disabled={seeding}
@@ -44,7 +43,14 @@ export default function HomePage() {
             {seeding ? <Loader2 size={14} className="animate-spin" /> : <Database size={14} />}
             Seed Baseline Data
           </button>
-          {seedResult && <span className="text-[10px] font-bold text-blue-600 animate-in fade-in">{seedResult}</span>}
+          <Link
+            to="/dashboard#demo-walkthrough"
+            className="px-6 py-2 bg-blue-50 border border-blue-200 rounded-xl text-xs font-bold uppercase tracking-widest text-blue-700 hover:bg-blue-100 transition flex items-center gap-2"
+          >
+            <Sparkles size={14} />
+            Demo walkthrough
+          </Link>
+          {seedResult && <span className="w-full text-center text-[10px] font-bold text-blue-600 animate-in fade-in sm:w-auto">{seedResult}</span>}
         </div>
       </section>
 
@@ -82,8 +88,6 @@ export default function HomePage() {
           icon={<LayoutDashboard className="w-8 h-8 text-emerald-500" />}
         />
       </div>
-
-      <DemoWalkthrough variant="home" />
 
       <div className="grid md:grid-cols-3 gap-6 pt-12">
         <div className="p-6 bg-white border border-slate-200 rounded-2xl shadow-sm space-y-3">

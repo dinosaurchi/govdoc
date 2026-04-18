@@ -1,15 +1,14 @@
 import { Link } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui-card';
-import { Route, Sparkles } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 
-type DemoWalkthroughProps = {
-  /** Home page includes the seed button; dashboard links back to it. */
-  variant: 'home' | 'dashboard';
-};
-
-export function DemoWalkthrough({ variant }: DemoWalkthroughProps) {
+/** Shown only on the dashboard — home links here via `/dashboard#demo-walkthrough`. */
+export function DemoWalkthrough() {
   return (
-    <Card className="border-blue-100 bg-gradient-to-br from-blue-50/80 to-white shadow-sm">
+    <Card
+      id="demo-walkthrough"
+      className="scroll-mt-24 border-blue-100 bg-gradient-to-br from-blue-50/80 to-white shadow-sm"
+    >
       <CardHeader className="pb-2">
         <CardTitle className="text-base flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-blue-600" />
@@ -27,22 +26,15 @@ export function DemoWalkthrough({ variant }: DemoWalkthroughProps) {
       </CardHeader>
       <CardContent className="space-y-3 text-sm text-slate-700">
         <ol className="list-decimal space-y-2 pl-5">
-          {variant === 'home' ? (
-            <li>
-              Click <span className="font-semibold">Seed Baseline Data</span> above to reset the demo queue (or use the same
-              action from the API in automated tests).
-            </li>
-          ) : (
-            <li>
-              Optional for workshops: on the{' '}
-              <Link to="/" className="font-semibold text-blue-700 underline-offset-2 hover:underline">
-                home page
-              </Link>
-              , use <span className="font-semibold">Seed Baseline Data</span> to reset stored documents to a known
-              starting queue so a guided session stays in sync—figures here are computed from those records like any other
-              deployment.
-            </li>
-          )}
+          <li>
+            Optional for workshops: on the{' '}
+            <Link to="/" className="font-semibold text-blue-700 underline-offset-2 hover:underline">
+              home page
+            </Link>
+            , use <span className="font-semibold">Seed Baseline Data</span> to reset stored documents to a known starting
+            queue so a guided session stays in sync—figures below are computed from those records like any other
+            deployment.
+          </li>
           <li>
             Set <span className="font-semibold">Active Role</span> to <span className="font-semibold">Intake Clerk</span>, open{' '}
             <Link to="/intake" className="font-semibold text-blue-700 underline-offset-2 hover:underline">
@@ -58,12 +50,8 @@ export function DemoWalkthrough({ variant }: DemoWalkthroughProps) {
             to validate AI routing and workflow actions.
           </li>
           <li>
-            Use <span className="font-semibold">Supervisor</span> →{' '}
-            <Link to="/dashboard" className="inline-flex items-center gap-1 font-semibold text-blue-700 underline-offset-2 hover:underline">
-              <Route className="h-3.5 w-3.5" />
-              Dashboard
-            </Link>{' '}
-            for aggregate metrics (trend badges are illustrative in this MVP).
+            Select <span className="font-semibold">Supervisor</span> in the header and return here for aggregate metrics
+            (trend badges are illustrative in this MVP).
           </li>
         </ol>
       </CardContent>
