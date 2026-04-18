@@ -162,11 +162,17 @@ function DocumentDetailInner({ id }: { id: string }) {
   const [rerouteDepartmentId, setRerouteDepartmentId] = useState('');
   const [rerouteRationale, setRerouteRationale] = useState('');
   const [analysisView, setAnalysisView] = useState<'rendered' | 'raw'>('rendered');
-  const [flash, setFlash] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
+  const [flash, setFlash] = useState<{
+    tone: 'success' | 'error';
+    message: string;
+    link?: { to: string; label: string };
+  } | null>(null);
 
   useEffect(() => {
     if (!flash) return;
-    const handle = window.setTimeout(() => setFlash(null), 5000);
+    // Longer dwell when we show a follow-up link so users can click it.
+    const ms = flash.link ? 12_000 : 5000;
+    const handle = window.setTimeout(() => setFlash(null), ms);
     return () => window.clearTimeout(handle);
   }, [flash]);
 
@@ -232,7 +238,18 @@ function DocumentDetailInner({ id }: { id: string }) {
         await apiPost(`/documents/${id}/analyze`, undefined, role);
       }
       await fetchDoc({ silent: true });
-      setFlash({ tone: 'success', message: actionSuccessMessage(action, payload, departments) });
+      setFlash({
+        tone: 'success',
+        message: actionSuccessMessage(action, payload, departments),
+        ...(action === 'request-consultation'
+          ? {
+              link: {
+                to: `/consultation?doc=${id}`,
+                label: 'Open consultation thread',
+              },
+            }
+          : {}),
+      });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Action failed';
       setFlash({ tone: 'error', message });
@@ -342,10 +359,26 @@ function DocumentDetailInner({ id }: { id: string }) {
           ) : (
             <AlertTriangle size={18} className="text-red-600 shrink-0 mt-0.5" />
           )}
-          <span className="flex-1">{flash.message}</span>
+          <div className="flex-1 min-w-0 space-y-2">
+            <p>{flash.message}</p>
+            {flash.link && (
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  to={flash.link.to}
+                  data-testid="consultation-request-follow-link"
+                  className="inline-flex items-center rounded-lg border border-emerald-400 bg-white px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-emerald-900 hover:bg-emerald-100"
+                >
+                  {flash.link.label}
+                </Link>
+                <span className="text-[11px] text-emerald-800/90">
+                  Same thread appears here under &quot;Consultation thread&quot; — use the link for the full chat view.
+                </span>
+              </div>
+            )}
+          </div>
           <button
             type="button"
-            className="text-xs font-bold uppercase tracking-wider opacity-60 hover:opacity-100"
+            className="text-xs font-bold uppercase tracking-wider opacity-60 hover:opacity-100 shrink-0"
             onClick={() => setFlash(null)}
           >
             Dismiss
@@ -1046,7 +1079,7 @@ function actionSuccessMessage(
     case 'close':
       return 'Document closed.';
     case 'request-consultation':
-      return 'Consultation requested.';
+      return 'Consultation requested — the consultant can reply from the Consultation page or in the thread below.';
     case 'resolve-consultation':
       return 'Consultation resolved.';
     case 'analyze':
