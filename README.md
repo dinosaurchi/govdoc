@@ -55,23 +55,45 @@ The result: faster processing, fewer routing errors, built-in audit trails, and 
 
 ## Screenshots
 
+Overview of the main UI flows. **Click an image** to open the full-size file in the repository.
+
 <table>
-  <tr>
-    <td align="center"><b>Homepage Dashboard</b></td>
-    <td align="center"><b>Upload & Status Tracking</b></td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/homepage.png" alt="Homepage Dashboard" width="480" /></td>
-    <td><img src="docs/screenshots/upload-status.png" alt="Upload Status" width="480" /></td>
-  </tr>
-  <tr>
-    <td align="center"><b>AI Classification & Analysis</b></td>
-    <td align="center"><b>Consultation Workflow</b></td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/classification.png" alt="Classification" width="480" /></td>
-    <td><img src="docs/screenshots/consultantion.png" alt="Consultation" width="480" /></td>
-  </tr>
+  <thead>
+    <tr>
+      <th align="center">Homepage Dashboard</th>
+      <th align="center">Upload &amp; Status Tracking</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center" valign="top">
+        <a href="docs/screenshots/1.homepage.png" title="Open full size — Homepage Dashboard">
+          <img src="docs/screenshots/1.homepage.png" alt="Homepage Dashboard" width="440" />
+        </a>
+      </td>
+      <td align="center" valign="top">
+        <a href="docs/screenshots/2.upload-status.png" title="Open full size — Upload &amp; status">
+          <img src="docs/screenshots/2.upload-status.png" alt="Upload and document status tracking" width="440" />
+        </a>
+      </td>
+    </tr>
+    <tr>
+      <th align="center">AI Classification &amp; Analysis</th>
+      <th align="center">Consultation Workflow</th>
+    </tr>
+    <tr>
+      <td align="center" valign="top">
+        <a href="docs/screenshots/3.classification.png" title="Open full size — Classification">
+          <img src="docs/screenshots/3.classification.png" alt="AI classification and analysis" width="440" />
+        </a>
+      </td>
+      <td align="center" valign="top">
+        <a href="docs/screenshots/4.consultantion.png" title="Open full size — Consultation">
+          <img src="docs/screenshots/4.consultantion.png" alt="Consultation workflow between departments" width="440" />
+        </a>
+      </td>
+    </tr>
+  </tbody>
 </table>
 
 ---
