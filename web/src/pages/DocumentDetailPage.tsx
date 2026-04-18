@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui-card';
 import { Badge } from '@/components/ui-badge';
@@ -168,12 +168,24 @@ function DocumentDetailInner({ id }: { id: string }) {
     link?: { to: string; label: string };
   } | null>(null);
 
+  const flashBannerRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (!flash) return;
     // Longer dwell when we show a follow-up link so users can click it.
     const ms = flash.link ? 12_000 : 5000;
     const handle = window.setTimeout(() => setFlash(null), ms);
     return () => window.clearTimeout(handle);
+  }, [flash]);
+
+  // After requesting consultation the user is often scrolled to the workflow
+  // panel — scroll the success banner into view so the follow-up link is seen.
+  useEffect(() => {
+    if (!flash?.link) return;
+    const id = requestAnimationFrame(() => {
+      flashBannerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    return () => cancelAnimationFrame(id);
   }, [flash]);
 
   const fetchDoc = async (opts?: { silent?: boolean }) => {
@@ -345,6 +357,7 @@ function DocumentDetailInner({ id }: { id: string }) {
 
       {flash && (
         <div
+          ref={flashBannerRef}
           className={`rounded-xl border px-4 py-3 text-sm font-medium flex items-start gap-3 ${
             flash.tone === 'success'
               ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
@@ -528,11 +541,37 @@ function DocumentDetailInner({ id }: { id: string }) {
 
           {/* Consultation Notes */}
           {hasConsultationThread && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <MessageSquare size={18} className="text-purple-600" /> Consultation thread
-                </CardTitle>
+            <Card data-testid="consultation-thread-card">
+              <CardHeader className="border-b border-slate-100 pb-4 space-y-3">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <MessageSquare size={18} className="text-purple-600" /> Consultation thread
+                  </CardTitle>
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <Link
+                      to={`/consultation?doc=${doc.id}`}
+                      data-testid="consultation-thread-full-view-link"
+                      className="inline-flex items-center rounded-lg border border-purple-300 bg-purple-50 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-purple-900 hover:bg-purple-100"
+                    >
+                      Open consultation page
+                    </Link>
+                    <Link
+                      to="/review"
+                      data-testid="consultation-thread-review-queue-link"
+                      className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-700 hover:bg-slate-100"
+                    >
+                      Review queue
+                    </Link>
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  The same messages appear here and on the{' '}
+                  <Link to="/consultation" className="font-semibold text-purple-700 underline-offset-2 hover:underline">
+                    Internal Consultation
+                  </Link>{' '}
+                  page (chat-style layout). Use <span className="font-semibold">Review queue</span> to find this case
+                  alongside other documents.
+                </p>
               </CardHeader>
               <CardContent className="space-y-4">
                 {doc.consultation_notes.length > 0 ? (
