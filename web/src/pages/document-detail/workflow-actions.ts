@@ -544,6 +544,59 @@ export const PIPELINE_STAGES: readonly { id: string; label: string; description:
   { id: 'closed', label: 'Closed', description: 'File closed. No further actions.' },
 ] as const;
 
+/** Index of the in-consultation step (for skip-detection). */
+export const PIPELINE_IN_CONSULTATION_INDEX = PIPELINE_STAGES.findIndex(
+  (s) => s.id === 'in_consultation',
+);
+
+/** Visual state for one row of the workflow progress stepper. */
+export type PipelineStepVisualState = 'done' | 'active' | 'pending';
+
+/**
+ * Computes stepper visuals for `PIPELINE_STAGES[stageIndex]` given API status.
+ *
+ * - `closed` is terminal for actions but is still the last pipeline stage — all
+ *   rows show as completed (fixes the bug where `isTerminalStatus(closed)`
+ *   greyed out every row).
+ * - `approved` without any consultation notes keeps the In Consultation row
+ *   **pending** so we do not imply a consultation that never happened.
+ */
+export function getPipelineStepState(
+  status: string,
+  stageIndex: number,
+  options?: { hadConsultationActivity?: boolean },
+): PipelineStepVisualState {
+  const hadConsultation = options?.hadConsultationActivity ?? false;
+  const currentIdx = getPipelineIndex(status);
+
+  if (status === 'closed') {
+    return 'done';
+  }
+
+  // Hard terminal outcomes that are not represented as a pipeline row
+  if (isTerminalStatus(status) && currentIdx < 0) {
+    return 'pending';
+  }
+
+  if (currentIdx < 0) {
+    return 'pending';
+  }
+
+  const ciIdx = PIPELINE_IN_CONSULTATION_INDEX;
+  if (
+    ciIdx >= 0 &&
+    stageIndex === ciIdx &&
+    status === 'approved' &&
+    !hadConsultation
+  ) {
+    return 'pending';
+  }
+
+  if (currentIdx > stageIndex) return 'done';
+  if (currentIdx === stageIndex) return 'active';
+  return 'pending';
+}
+
 /** Returns the index of the status inside PIPELINE_STAGES, or -1 for terminal
  *  error states / unknown statuses. */
 export function getPipelineIndex(status: string): number {

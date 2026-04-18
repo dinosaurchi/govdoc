@@ -36,7 +36,7 @@ import {
   toRoleId,
   toButtonVariant,
   PIPELINE_STAGES,
-  getPipelineIndex,
+  getPipelineStepState,
   getResponsibleRoles,
   getNextStepHint,
   getActionsAvailableForOtherRoles,
@@ -565,7 +565,12 @@ function DocumentDetailInner({ id }: { id: string }) {
 
         {/* Sidebar — Workflow Actions */}
         <div className="space-y-6">
-          <WorkflowPipeline status={doc.status} />
+          <WorkflowPipeline
+            status={doc.status}
+            hadConsultationActivity={
+              doc.consultation_notes.length > 0 || doc.status === 'in_consultation'
+            }
+          />
 
           <Card data-testid="workflow-actions-panel">
             <CardHeader>
@@ -1112,12 +1117,15 @@ function DisabledActionWrapper({ reason, children }: { reason: string | null; ch
 // Workflow guide — visual pipeline + role context + disabled-actions disclosure
 // ---------------------------------------------------------------------------
 
-function WorkflowPipeline({ status }: { status: string }) {
+function WorkflowPipeline({
+  status,
+  hadConsultationActivity,
+}: {
+  status: string;
+  hadConsultationActivity: boolean;
+}) {
   const terminal = isTerminalStatus(status);
-  const currentIdx = getPipelineIndex(status);
 
-  // When the doc is in `in_consultation`, treat that as the current stage; when
-  // terminal, we highlight the "nearest" stage reached before the terminal hop.
   return (
     <Card data-testid="workflow-pipeline">
       <CardHeader>
@@ -1128,9 +1136,11 @@ function WorkflowPipeline({ status }: { status: string }) {
       <CardContent>
         <ol className="space-y-2">
           {PIPELINE_STAGES.map((stage, idx) => {
-            // Determine visual status of this node.
-            const done = !terminal && currentIdx > idx;
-            const active = !terminal && currentIdx === idx;
+            const stepState = getPipelineStepState(status, idx, {
+              hadConsultationActivity,
+            });
+            const done = stepState === 'done';
+            const active = stepState === 'active';
             const icon = done ? (
               <CheckCircle2 size={16} className="text-emerald-600" />
             ) : active ? (
@@ -1145,7 +1155,7 @@ function WorkflowPipeline({ status }: { status: string }) {
                   active ? 'bg-blue-50' : ''
                 }`}
                 data-testid={`pipeline-stage-${stage.id}`}
-                data-status={active ? 'active' : done ? 'done' : 'pending'}
+                data-status={stepState}
               >
                 <div className="mt-0.5 shrink-0">{icon}</div>
                 <div className="flex-1">

@@ -21,6 +21,8 @@ import {
   getWorkflowStatusMessage,
   getForwardActionId,
   getNextStepHint,
+  getPipelineStepState,
+  PIPELINE_IN_CONSULTATION_INDEX,
   type DocContext,
 } from './workflow-actions';
 
@@ -534,5 +536,50 @@ describe('getNextStepHint with DocContext', () => {
   it('string-arg overload falls back to status-only hints', () => {
     expect(getNextStepHint('approved', 'supervisor')).toMatch(/close/i);
     expect(getNextStepHint('in_consultation')).toMatch(/consultation/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getPipelineStepState (workflow progress stepper)
+// ---------------------------------------------------------------------------
+
+describe('getPipelineStepState', () => {
+  const ci = PIPELINE_IN_CONSULTATION_INDEX;
+  it('marks every stage done for closed documents (not all greyed out)', () => {
+    for (let i = 0; i < 8; i += 1) {
+      expect(getPipelineStepState('closed', i)).toBe('done');
+    }
+  });
+
+  it('shows approved as active and consultation as pending when consultation was skipped', () => {
+    expect(getPipelineStepState('approved', ci, { hadConsultationActivity: false })).toBe(
+      'pending',
+    );
+    expect(getPipelineStepState('approved', 6, { hadConsultationActivity: false })).toBe(
+      'active',
+    );
+  });
+
+  it('shows consultation as done on approved when notes existed', () => {
+    expect(getPipelineStepState('approved', ci, { hadConsultationActivity: true })).toBe(
+      'done',
+    );
+    expect(getPipelineStepState('approved', 6, { hadConsultationActivity: true })).toBe(
+      'active',
+    );
+  });
+
+  it('greys all rows for terminal statuses outside the pipeline (e.g. out_of_scope)', () => {
+    expect(getPipelineStepState('out_of_scope', 0)).toBe('pending');
+    expect(getPipelineStepState('ingest_failed', 3)).toBe('pending');
+  });
+
+  it('marks under_review as active at the correct index', () => {
+    expect(getPipelineStepState('under_review', 3, { hadConsultationActivity: false })).toBe(
+      'done',
+    );
+    expect(getPipelineStepState('under_review', 4, { hadConsultationActivity: false })).toBe(
+      'active',
+    );
   });
 });
