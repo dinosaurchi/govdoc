@@ -18,6 +18,8 @@ import {
   canClose,
   getWorkflowActionStates,
   getWorkflowStatusMessage,
+  getForwardActionId,
+  getNextStepHint,
   type DocContext,
 } from './workflow-actions';
 
@@ -409,5 +411,82 @@ describe('getWorkflowStatusMessage', () => {
 
   it('returns empty string for unknown status', () => {
     expect(getWorkflowStatusMessage('some_unknown_status')).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getForwardActionId
+// ---------------------------------------------------------------------------
+
+describe('getForwardActionId', () => {
+  it('returns close for supervisor on under_review with an assigned department', () => {
+    expect(
+      getForwardActionId(
+        doc({ status: 'under_review', assigned_department_id: 'phong_tai_chinh' }),
+        'supervisor',
+      ),
+    ).toBe('close');
+  });
+
+  it('returns reroute for supervisor on under_review when no department is assigned', () => {
+    expect(
+      getForwardActionId(
+        doc({ status: 'under_review', assigned_department_id: null }),
+        'supervisor',
+      ),
+    ).toBe('reroute');
+    expect(
+      getForwardActionId(
+        doc({ status: 'under_review' }), // undefined dept → same as null
+        'supervisor',
+      ),
+    ).toBe('reroute');
+  });
+
+  it('string-arg overload still works (legacy callers)', () => {
+    expect(getForwardActionId('under_review', 'supervisor')).toBe('close');
+    expect(getForwardActionId('analyzed', 'reviewer')).toBe('approve-routing');
+    expect(getForwardActionId('in_consultation', 'consultant')).toBe('resolve-consultation');
+  });
+
+  it('returns null for roles without a forward action', () => {
+    expect(getForwardActionId('under_review', 'reviewer')).toBeNull();
+    expect(getForwardActionId('closed', 'supervisor')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getNextStepHint (doc-aware branch)
+// ---------------------------------------------------------------------------
+
+describe('getNextStepHint with DocContext', () => {
+  it('warns supervisor to reroute when under_review with no department', () => {
+    const hint = getNextStepHint(
+      doc({ status: 'under_review', assigned_department_id: null }),
+      'supervisor',
+    );
+    expect(hint).toMatch(/reroute/i);
+    expect(hint).not.toMatch(/close/i);
+  });
+
+  it('warns reviewer to reroute when under_review with no department', () => {
+    const hint = getNextStepHint(
+      doc({ status: 'under_review', assigned_department_id: undefined }),
+      'reviewer',
+    );
+    expect(hint).toMatch(/reroute/i);
+  });
+
+  it('keeps the normal supervisor close hint when under_review has a department', () => {
+    const hint = getNextStepHint(
+      doc({ status: 'under_review', assigned_department_id: 'phong_tai_chinh' }),
+      'supervisor',
+    );
+    expect(hint).toMatch(/close/i);
+  });
+
+  it('string-arg overload falls back to status-only hints', () => {
+    expect(getNextStepHint('approved', 'supervisor')).toMatch(/close/i);
+    expect(getNextStepHint('in_consultation')).toMatch(/consultation/i);
   });
 });

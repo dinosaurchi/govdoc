@@ -351,6 +351,7 @@ function DocumentDetailInner({ id }: { id: string }) {
       )}
 
       <OrphanedConsultationBanner doc={doc} />
+      <NoAssignedDepartmentBanner doc={doc} />
 
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
@@ -590,7 +591,7 @@ function DocumentDetailInner({ id }: { id: string }) {
                   data-testid="workflow-empty"
                 >
                   <p className="font-semibold text-slate-700">No actions for your role on this document.</p>
-                  <p className="mt-1 text-xs text-slate-500">{getNextStepHint(doc.status, roleId)}</p>
+                  <p className="mt-1 text-xs text-slate-500">{getNextStepHint(doc, roleId)}</p>
                 </div>
               ) : (
                 <>
@@ -605,7 +606,7 @@ function DocumentDetailInner({ id }: { id: string }) {
                     });
                     const { forward, alternatives } = partitionByForwardness(
                       filtered,
-                      doc.status,
+                      doc,
                       roleId,
                     );
                     const renderOne = (action: typeof filtered[number]) =>
@@ -666,7 +667,7 @@ function DocumentDetailInner({ id }: { id: string }) {
                   {/* Progression actions available to other roles — only shown
                       when the current role itself has no forward action (i.e.
                       the user genuinely needs to hand off to another role). */}
-                  {getForwardActionId(doc.status, roleId) === null && (
+                  {getForwardActionId(doc, roleId) === null && (
                     <OtherRolesActions
                       doc={doc}
                       currentRoleId={roleId}
@@ -1003,6 +1004,8 @@ function forwardExplanation(actionId: string): string {
       return 'All review work is done — close the document to finalize the workflow.';
     case 'resolve-consultation':
       return 'Mark the consultation note as resolved so the document can continue.';
+    case 'reroute':
+      return 'Pick a department to own this document before it can progress further.';
     default:
       return 'This is the action that most advances the workflow right now.';
   }
@@ -1224,6 +1227,35 @@ function WorkflowContext({
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+function NoAssignedDepartmentBanner({ doc }: { doc: DocDetail }) {
+  // A document that's been opened for review but never got a department
+  // assignment is stuck in limbo: the forward-action heuristic recommends
+  // rerouting (see workflow-actions.ts), but users need a clear visual
+  // cue that the current owner is literally nobody.
+  if (doc.assigned_department_id) return null;
+  // Only surface once the doc has progressed past intake/AI stages.
+  const relevantStatuses = new Set(['routed', 'under_review', 'in_consultation']);
+  if (!relevantStatuses.has(doc.status)) return null;
+  return (
+    <div
+      role="alert"
+      data-testid="no-assigned-department-warning"
+      className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+    >
+      <AlertTriangle size={18} className="text-amber-600 shrink-0 mt-0.5" />
+      <div className="flex-1 space-y-1">
+        <p className="font-bold">No department assigned to this document</p>
+        <p className="text-xs text-amber-800">
+          The document is <span className="font-semibold">{humanizeEnum(doc.status)}</span>
+          {' '}but has no owning department. Use{' '}
+          <span className="font-semibold">Reroute document</span> below to pick a
+          department before approving or closing.
+        </p>
+      </div>
     </div>
   );
 }

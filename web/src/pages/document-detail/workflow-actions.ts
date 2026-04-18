@@ -29,6 +29,7 @@ export type DocContext = {
   status: string;
   analyses?: unknown[];
   consultation_notes?: Array<{ resolved_at: string | null }>;
+  assigned_department_id?: string | null;
 };
 
 export interface WorkflowAction {
@@ -278,7 +279,34 @@ const FORWARD_ACTION_BY_STATUS_ROLE: Record<string, Partial<Record<Role, string>
   approved: { supervisor: 'close' },
 };
 
-export function getForwardActionId(status: string, role: Role): string | null {
+/**
+ * Pick the single forward action for (status, role).
+ *
+ * Accepts either a raw status string or a full DocContext. When a
+ * DocContext is provided we apply a few context-sensitive overrides:
+ *   - `under_review` + supervisor + NO assigned_department_id → recommend
+ *     `reroute` instead of `close`. Closing an un-routed document would
+ *     just hide an un-owned case; the supervisor needs to pick a
+ *     department first.
+ */
+export function getForwardActionId(
+  statusOrDoc: string | DocContext,
+  role: Role,
+): string | null {
+  const doc: DocContext | null =
+    typeof statusOrDoc === 'string' ? null : statusOrDoc;
+  const status = typeof statusOrDoc === 'string' ? statusOrDoc : statusOrDoc.status;
+
+  if (
+    doc &&
+    status === 'under_review' &&
+    role === 'supervisor' &&
+    !doc.assigned_department_id
+  ) {
+    // No owner picked yet — recommend rerouting instead of closing.
+    return 'reroute';
+  }
+
   return FORWARD_ACTION_BY_STATUS_ROLE[status]?.[role] ?? null;
 }
 
@@ -303,10 +331,10 @@ export function isAlternativeAction(actionId: string): boolean {
  */
 export function partitionByForwardness(
   actions: WorkflowAction[],
-  status: string,
+  statusOrDoc: string | DocContext,
   role: Role,
 ): { forward: WorkflowAction | null; alternatives: WorkflowAction[] } {
-  const forwardId = getForwardActionId(status, role);
+  const forwardId = getForwardActionId(statusOrDoc, role);
   let forward: WorkflowAction | null = null;
   const alternatives: WorkflowAction[] = [];
   for (const a of actions) {
@@ -342,7 +370,7 @@ export function getActionsAvailableForOtherRoles(
     const all = WORKFLOW_ACTIONS.filter(
       (a) => a.allowedRoles.includes(role) && a.isAvailable(doc, role),
     );
-    const forwardId = getForwardActionId(doc.status, role);
+    const forwardId = getForwardActionId(doc, role);
     const forward = forwardId ? all.find((a) => a.id === forwardId) ?? null : null;
     // Only show the other role if they have a *forward* (progressive) action.
     // Listing "reroute / reroute / reroute" for every other role adds noise
@@ -531,8 +559,15 @@ export function getResponsibleRoles(status: string): Role[] {
  *  pill on the document detail page. When `role` is provided the copy is
  *  tailored to that role so the user isn't told "a Reviewer must act"
  *  while they are already Supervisor. */
-export function getNextStepHint(status: string, role?: Role): string {
-  const roleHint = role ? getNextStepHintForRole(status, role) : null;
+export function getNextStepHint(
+  statusOrDoc: string | DocContext,
+  role?: Role,
+): string {
+  const doc: DocContext | null =
+    typeof statusOrDoc === 'string' ? null : statusOrDoc;
+  const status = typeof statusOrDoc === 'string' ? statusOrDoc : statusOrDoc.status;
+
+  const roleHint = role ? getNextStepHintForRole(status, role, doc) : null;
   if (roleHint) return roleHint;
   switch (status) {
     case 'received':
@@ -562,8 +597,21 @@ export function getNextStepHint(status: string, role?: Role): string {
   }
 }
 
-function getNextStepHintForRole(status: string, role: Role): string | null {
+function getNextStepHintForRole(
+  status: string,
+  role: Role,
+  doc?: DocContext | null,
+): string | null {
   if (status === 'under_review') {
+    if (doc && !doc.assigned_department_id) {
+      // No owning department — rerouting is the first real next step.
+      if (role === 'supervisor') {
+        return 'No department has been assigned yet — reroute to a department before closing.';
+      }
+      if (role === 'reviewer') {
+        return 'No department has been assigned yet — reroute to a department, or hand off to a Supervisor.';
+      }
+    }
     if (role === 'supervisor') return 'Review the routing decision, then close the document to finalize it.';
     if (role === 'reviewer') return 'Review, request consultation, or hand off to a Supervisor to close.';
   }

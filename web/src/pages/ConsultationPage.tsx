@@ -397,7 +397,8 @@ export default function ConsultationPage() {
                       </span>
                     )}
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 font-bold">
-                      <MessageCircle size={10} /> {selectedDoc.consultation_notes.length} notes
+                      <MessageCircle size={10} /> {selectedDoc.consultation_notes.length}{' '}
+                      {selectedDoc.consultation_notes.length === 1 ? 'note' : 'notes'}
                     </span>
                   </div>
                 </div>
