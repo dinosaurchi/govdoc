@@ -265,6 +265,34 @@ export interface ActionStates {
  * For terminal-status documents ALL actions are hidden — the caller should
  * render a terminal-state message instead of the action panel.
  */
+/**
+ * Returns, per *other* role, the progression actions that would be
+ * available right now on this document if the user switched to that role.
+ *
+ * Used to drive the "needs another role" CTA: when a reviewer has
+ * rerouted a document there are no further actions *for them* that move
+ * the case to a terminal state (e.g. `close`), but a Supervisor could
+ * close it — we want to surface that clearly instead of leaving the user
+ * wondering why nothing else happens.
+ */
+export function getActionsAvailableForOtherRoles(
+  doc: DocContext,
+  currentRole: Role,
+): Array<{ role: Role; actions: WorkflowAction[] }> {
+  if (isTerminalStatus(doc.status)) return [];
+  const otherRoles: Role[] = (['reviewer', 'supervisor', 'consultant', 'intake_clerk'] as Role[]).filter(
+    (r) => r !== currentRole,
+  );
+  const result: Array<{ role: Role; actions: WorkflowAction[] }> = [];
+  for (const role of otherRoles) {
+    const actions = WORKFLOW_ACTIONS.filter(
+      (a) => a.allowedRoles.includes(role) && a.isAvailable(doc, role),
+    );
+    if (actions.length > 0) result.push({ role, actions });
+  }
+  return result;
+}
+
 export function getWorkflowActionStates(
   doc: DocContext,
   role: Role,
@@ -324,6 +352,12 @@ const FRONTEND_ROLE_MAP: Record<string, Role> = {
 
 export function toRoleId(frontendRole: string): Role {
   return FRONTEND_ROLE_MAP[frontendRole] ?? 'intake_clerk';
+}
+
+/** Inverse of `toRoleId` — return the frontend label stored in `RoleProvider`. */
+export function toFrontendRoleLabel(roleId: Role): string {
+  const entry = Object.entries(FRONTEND_ROLE_MAP).find(([, id]) => id === roleId);
+  return entry ? entry[0] : 'Intake Clerk';
 }
 
 // ---------------------------------------------------------------------------

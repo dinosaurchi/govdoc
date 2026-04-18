@@ -40,6 +40,8 @@ import {
   getPipelineIndex,
   getResponsibleRoles,
   getNextStepHint,
+  getActionsAvailableForOtherRoles,
+  toFrontendRoleLabel,
   ROLE_LABEL,
   type ButtonVariant,
   type Role,
@@ -147,7 +149,7 @@ export default function DocumentDetailPage() {
 }
 
 function DocumentDetailInner({ id }: { id: string }) {
-  const { role } = useRole();
+  const { role, setRole } = useRole();
   const [doc, setDoc] = useState<DocDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -567,6 +569,10 @@ function DocumentDetailInner({ id }: { id: string }) {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              <RoutingDecisionCallout
+                decisions={doc.routing_decisions}
+                displayDepartment={displayDepartment}
+              />
               <WorkflowContext
                 status={doc.status}
                 role={role}
@@ -628,6 +634,15 @@ function DocumentDetailInner({ id }: { id: string }) {
                       })}
                     </div>
                   )}
+
+                  {/* Progression actions available to other roles — exposes the next owner */}
+                  <OtherRolesActions
+                    doc={doc}
+                    currentRoleId={roleId}
+                    onSwitchRole={(targetId) => {
+                      setRole(toFrontendRoleLabel(targetId) as typeof role);
+                    }}
+                  />
 
                   {/* Disabled actions — role allows them, but status doesn't */}
                   {actionStates.disabled.length > 0 && (
@@ -1164,6 +1179,109 @@ function WorkflowContext({
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+function RoutingDecisionCallout({
+  decisions,
+  displayDepartment,
+}: {
+  decisions: RoutingDecision[];
+  displayDepartment: (value: string) => string;
+}) {
+  if (!decisions || decisions.length === 0) return null;
+  const latest = [...decisions].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  )[0];
+  const final = latest.final_department_id;
+  const decisionLabel = latest.decision === 'rerouted' ? 'Rerouted' : humanizeEnum(latest.decision);
+  const when = new Date(latest.created_at).toLocaleString();
+  const who = latest.decided_by_role
+    ? humanizeEnum(latest.decided_by_role)
+    : 'AI analysis';
+  return (
+    <div
+      className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-3 py-3 space-y-1.5"
+      data-testid="latest-routing-decision"
+    >
+      <div className="flex items-center gap-2 text-xs">
+        <Send size={14} className="text-emerald-700" />
+        <span className="text-[10px] font-black uppercase tracking-widest text-emerald-700">
+          Latest routing
+        </span>
+        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-800">
+          {decisionLabel}
+        </span>
+      </div>
+      <p className="text-sm text-slate-800">
+        {final ? (
+          <>
+            Assigned to{' '}
+            <span className="font-bold text-emerald-900">{displayDepartment(final)}</span>
+          </>
+        ) : (
+          <span className="italic text-slate-500">No final department recorded</span>
+        )}
+      </p>
+      {latest.rationale && (
+        <p className="text-xs text-slate-600 italic">&quot;{latest.rationale}&quot;</p>
+      )}
+      <p className="text-[10px] text-slate-500">
+        by {who} · {when}
+      </p>
+    </div>
+  );
+}
+
+function OtherRolesActions({
+  doc,
+  currentRoleId,
+  onSwitchRole,
+}: {
+  doc: DocDetail;
+  currentRoleId: Role;
+  onSwitchRole: (roleId: Role) => void;
+}) {
+  const groups = getActionsAvailableForOtherRoles(
+    { status: doc.status, analyses: doc.analyses, consultation_notes: doc.consultation_notes },
+    currentRoleId,
+  );
+  if (groups.length === 0) return null;
+
+  return (
+    <div
+      className="space-y-2 rounded-xl border border-blue-100 bg-blue-50/40 p-3"
+      data-testid="other-roles-actions"
+    >
+      <p className="text-[10px] font-black uppercase tracking-widest text-blue-700 flex items-center gap-1">
+        <UserCheck size={12} /> Next owner(s) for this document
+      </p>
+      <p className="text-xs text-slate-600 leading-relaxed">
+        To progress further, switch to another role:
+      </p>
+      <div className="space-y-2">
+        {groups.map(({ role: targetRole, actions }) => (
+          <div key={targetRole} className="rounded-lg bg-white border border-slate-200 p-2 space-y-1">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-bold text-slate-800">{ROLE_LABEL[targetRole]}</p>
+              <button
+                type="button"
+                onClick={() => onSwitchRole(targetRole)}
+                data-testid={`switch-to-${targetRole}`}
+                className="text-[10px] font-bold uppercase tracking-wider text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 rounded-md px-2 py-1 transition"
+              >
+                Switch role
+              </button>
+            </div>
+            <ul className="text-xs text-slate-600 list-disc list-inside space-y-0.5">
+              {actions.map((a) => (
+                <li key={a.id}>{a.label}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -3,7 +3,10 @@ import { test, expect } from '@playwright/test';
 const WEB = process.env.WEB_URL ?? 'http://172.17.0.1:3000';
 const API = process.env.API_URL ?? 'http://172.17.0.1:8000';
 
-test('reroute surfaces assigned department and success flash', async ({ page, request }) => {
+test('reroute surfaces assigned dept, success flash, latest routing callout, and next-owner CTA', async ({
+  page,
+  request,
+}) => {
   test.setTimeout(60_000);
 
   const listRes = await request.get(`${API}/api/v1/documents/?offset=0&limit=50`, {
@@ -11,7 +14,9 @@ test('reroute surfaces assigned department and success flash', async ({ page, re
   });
   expect(listRes.ok()).toBeTruthy();
   const docs = await listRes.json();
-  const candidate = docs.find((d: { status: string }) => ['analyzed', 'routed', 'under_review'].includes(d.status));
+  const candidate = docs.find((d: { status: string }) =>
+    ['analyzed', 'routed', 'under_review'].includes(d.status),
+  );
   expect(candidate, 'need at least one reroutable doc').toBeTruthy();
   const docId = candidate.id;
 
@@ -43,6 +48,23 @@ test('reroute surfaces assigned department and success flash', async ({ page, re
   await expect(page.getByTestId('document-flash-success')).toContainText(targetName);
 
   await expect(assigned).toContainText(targetName, { timeout: 10_000 });
-  const after = (await assigned.textContent())?.trim() ?? '';
-  expect(after).not.toBe(before);
+  expect((await assigned.textContent())?.trim()).not.toBe(before);
+
+  const callout = page.getByTestId('latest-routing-decision');
+  await expect(callout).toBeVisible();
+  await expect(callout).toContainText(/Rerouted/i);
+  await expect(callout).toContainText(targetName);
+  await expect(callout).toContainText(/reviewer/i);
+
+  const otherRoles = page.getByTestId('other-roles-actions');
+  await expect(otherRoles).toBeVisible();
+  await expect(otherRoles).toContainText('Supervisor');
+  await expect(otherRoles).toContainText(/close document/i);
+
+  await page.getByTestId('switch-to-supervisor').click();
+
+  const actingAs = page.getByTestId('workflow-context');
+  await expect(actingAs).toContainText(/Supervisor/, { timeout: 5_000 });
+
+  await expect(page.getByRole('button', { name: /close document/i })).toBeVisible();
 });
