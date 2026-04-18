@@ -350,6 +350,8 @@ function DocumentDetailInner({ id }: { id: string }) {
         </div>
       )}
 
+      <OrphanedConsultationBanner doc={doc} />
+
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
           {/* File & Extraction Card */}
@@ -1222,6 +1224,47 @@ function WorkflowContext({
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+function OrphanedConsultationBanner({ doc }: { doc: DocDetail }) {
+  // If the document is already on `in_consultation` the normal consultation
+  // thread UI covers it — no extra warning needed.
+  if (doc.status === 'in_consultation') return null;
+
+  const openNotes = doc.consultation_notes.filter((n) => !n.resolved_at);
+  if (openNotes.length === 0) return null;
+
+  // Any non-`in_consultation` status with open notes is a data-drift
+  // situation caused by the pre-fix `resolve-consultation` bug (see
+  // FEEDBACK-13). Warn the user and deep-link them to the consultation
+  // thread so they can finish resolving.
+  const count = openNotes.length;
+  return (
+    <div
+      role="alert"
+      data-testid="orphaned-consultation-warning"
+      className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+    >
+      <AlertTriangle size={18} className="text-amber-600 shrink-0 mt-0.5" />
+      <div className="flex-1 space-y-1">
+        <p className="font-bold">
+          {count} unresolved consultation note{count === 1 ? '' : 's'} on this document
+        </p>
+        <p className="text-xs text-amber-800">
+          The document is currently <span className="font-semibold">{humanizeEnum(doc.status)}</span>
+          {' '}but still has open consultation note{count === 1 ? '' : 's'}. Resolve{' '}
+          {count === 1 ? 'it' : 'them all'} before approving or closing this document.
+        </p>
+      </div>
+      <Link
+        to={`/consultation?doc=${doc.id}`}
+        data-testid="orphaned-consultation-link"
+        className="shrink-0 rounded-lg border border-amber-400 bg-white px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-amber-800 hover:bg-amber-100"
+      >
+        Open consultation thread
+      </Link>
     </div>
   );
 }

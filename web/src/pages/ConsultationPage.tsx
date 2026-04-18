@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 const INITIAL_SIDEBAR_LIMIT = 15;
 const SIDEBAR_PAGE_SIZE = 15;
@@ -99,8 +100,10 @@ function formatRelative(iso?: string | null): string {
 
 export default function ConsultationPage() {
   const { role } = useRole();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkDocId = searchParams.get('doc');
   const [documents, setDocuments] = useState<ConsultDoc[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(deepLinkDocId);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
@@ -110,6 +113,16 @@ export default function ConsultationPage() {
 
   const currentRoleId = ROLE_ID_BY_LABEL[role];
   const canSend = canReply(role);
+
+  const handleSelectId = (id: string) => {
+    setSelectedId(id);
+    // Drop any ?doc=<id> deep-link once the user picks a different thread.
+    if (searchParams.get('doc') && searchParams.get('doc') !== id) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('doc');
+      setSearchParams(next, { replace: true });
+    }
+  };
 
   const fetchConsultations = async (opts?: { preserveSelection?: boolean }) => {
     try {
@@ -121,6 +134,11 @@ export default function ConsultationPage() {
       setSelectedId((prev) => {
         if (opts?.preserveSelection && prev && consultDocs.some((d) => d.id === prev)) {
           return prev;
+        }
+        // Honor a ?doc=<id> deep link on first successful load (e.g. from
+        // the document-detail orphaned-notes warning banner).
+        if (deepLinkDocId && consultDocs.some((d) => d.id === deepLinkDocId)) {
+          return deepLinkDocId;
         }
         return prev ?? consultDocs[0]?.id ?? null;
       });
@@ -310,7 +328,7 @@ export default function ConsultationPage() {
                   tone="blue"
                   documents={activeThreads}
                   selectedId={selectedId}
-                  onSelect={setSelectedId}
+                  onSelect={handleSelectId}
                   visibleLimit={visibleLimit}
                   emptyHint={query ? 'No active threads match.' : 'No active consultations.'}
                 />
@@ -321,7 +339,7 @@ export default function ConsultationPage() {
                     tone="slate"
                     documents={resolvedThreads}
                     selectedId={selectedId}
-                    onSelect={setSelectedId}
+                    onSelect={handleSelectId}
                     visibleLimit={
                       Math.max(0, visibleLimit - activeThreads.length)
                     }
