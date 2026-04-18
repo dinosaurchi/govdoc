@@ -53,6 +53,29 @@ The result: faster processing, fewer routing errors, built-in audit trails, and 
 
 ---
 
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center"><b>Homepage Dashboard</b></td>
+    <td align="center"><b>Upload & Status Tracking</b></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/homepage.png" alt="Homepage Dashboard" width="480" /></td>
+    <td><img src="docs/screenshots/upload-status.png" alt="Upload Status" width="480" /></td>
+  </tr>
+  <tr>
+    <td align="center"><b>AI Classification & Analysis</b></td>
+    <td align="center"><b>Consultation Workflow</b></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/classification.png" alt="Classification" width="480" /></td>
+    <td><img src="docs/screenshots/consultantion.png" alt="Consultation" width="480" /></td>
+  </tr>
+</table>
+
+---
+
 ## Architecture
 
 ```
