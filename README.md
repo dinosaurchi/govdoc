@@ -1,6 +1,8 @@
-# GovDoc SecureFlow
-
-**AI-powered government document processing with intelligent routing, classification, and multi-role workflow.**
+<div align="center">
+  <img src="docs/logo.svg" alt="GovDoc SecureFlow Logo" width="120" height="120" />
+  <h1>GovDoc SecureFlow</h1>
+  <p><strong>AI-powered government document processing with intelligent routing, classification, and multi-role workflow.</strong></p>
+</div>
 
 ![Python](https://img.shields.io/badge/python-3.12-blue)
 ![React](https://img.shields.io/badge/react-19-61dafb)
