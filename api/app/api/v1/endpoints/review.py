@@ -44,8 +44,38 @@ async def approve_routing(
             detail={"error": {"code": "INVALID_TRANSITION", "message": str(e), "details": {}}},
         )
 
+    # Look up the AI-produced routing decision (created during analysis with
+    # decision="accepted" but final_department_id=None pending human review).
+    # Accepting the AI suggestion means copying its suggested_department_id
+    # onto both the routing decision and the document itself.
+    ai_routing = (
+        db.query(RoutingDecision)
+        .filter(RoutingDecision.document_id == document_id)
+        .order_by(RoutingDecision.created_at.desc())
+        .first()
+    )
+    if ai_routing is None or not ai_routing.suggested_department_id:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "NO_AI_ROUTING",
+                    "message": (
+                        "Document has no AI routing suggestion to approve. "
+                        "Re-run analysis or use reroute-document instead."
+                    ),
+                    "details": {},
+                }
+            },
+        )
+
+    ai_routing.final_department_id = ai_routing.suggested_department_id
+    ai_routing.decided_by_role = role.id
+
     document.status = DocumentStatus.routed
     document.assigned_reviewer_role = role.id
+    document.assigned_department_id = ai_routing.suggested_department_id
+
     write_audit_event(
         db,
         document_id=document_id,
@@ -53,6 +83,7 @@ async def approve_routing(
         event_type="workflow.transition",
         from_state=old_status,
         to_state="routed",
+        metadata_json={"department_id": ai_routing.suggested_department_id},
     )
     db.commit()
     return {"document": document, "message": "Routing approved"}
