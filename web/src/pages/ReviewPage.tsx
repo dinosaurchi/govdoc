@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card } from '@/components/ui-card';
 import { Badge } from '@/components/ui-badge';
-import { Search, ChevronRight, Loader2 } from 'lucide-react';
+import { Search, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { apiGetPaged } from '@/lib/api';
 import { useRole } from '@/hooks/use-role';
+import { WorkflowDocConnections } from '@/components/WorkflowDocConnections';
 
 type DocListItem = {
   id: string;
@@ -108,6 +109,10 @@ export default function ReviewPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Review Queue</h1>
           <p className="text-slate-500">Manage and route incoming administrative documents.</p>
+          <p className="text-xs text-slate-400 mt-1 max-w-xl">
+            Click a row for the full document hub. Use <strong className="font-semibold text-slate-500">Open elsewhere</strong>{' '}
+            to jump to Consultation or Response for the same case.
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative">
@@ -160,7 +165,7 @@ export default function ReviewPage() {
                   <th className="px-6 py-4">Urgency</th>
                   <th className="px-6 py-4">Security</th>
                   <th className="px-6 py-4">Created</th>
-                  <th className="px-6 py-4 text-right">Actions</th>
+                  <th className="px-6 py-4 text-right">Open elsewhere</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -207,11 +212,14 @@ export default function ReviewPage() {
                     <td className="px-6 py-4 text-xs text-slate-400">
                       {new Date(doc.created_at).toLocaleDateString()}
                     </td>
-                    <td className="px-6 py-4 text-right">
-                      <ChevronRight
-                        size={18}
-                        className="inline-block text-slate-300 group-hover:text-blue-600 transition-colors"
-                        aria-label="Open document"
+                    <td
+                      className="px-6 py-4 text-right align-top"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <WorkflowDocConnections
+                        docId={doc.id}
+                        current="review"
+                        onLinkClick={(e) => e.stopPropagation()}
                       />
                     </td>
                   </tr>

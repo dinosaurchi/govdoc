@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { apiGet, apiPost } from '@/lib/api';
 import { useRole, type Role } from '@/hooks/use-role';
+import { WorkflowDocConnections } from '@/components/WorkflowDocConnections';
 
 type ConsultationNote = {
   id: string;
@@ -384,11 +385,11 @@ export default function ConsultationPage() {
           >
             <div className="px-5 py-4 border-b border-slate-100 bg-white">
               <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0 flex-1 space-y-2">
                   <h2 className="text-base font-bold text-slate-900 truncate">
                     {selectedDoc.title}
                   </h2>
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                  <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
                     <StatusPill status={selectedDoc.status} />
                     {selectedDoc.urgency && selectedDoc.urgency !== 'normal' && (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-orange-100 text-orange-800 font-bold uppercase">
@@ -401,6 +402,7 @@ export default function ConsultationPage() {
                       {selectedDoc.consultation_notes.length === 1 ? 'note' : 'notes'}
                     </span>
                   </div>
+                  <WorkflowDocConnections docId={selectedDoc.id} current="consultation" />
                 </div>
                 <span className="text-[10px] text-slate-400 font-mono shrink-0 mt-1">
                   #{selectedDoc.id.slice(0, 8)}
@@ -658,6 +660,18 @@ function ThreadCard({
             </span>
           )}
         </div>
+      </div>
+      <div
+        className="px-2 pb-2 pt-1 border-t border-slate-100"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        <WorkflowDocConnections
+          docId={doc.id}
+          current="consultation"
+          dense
+          onLinkClick={(e) => e.stopPropagation()}
+        />
       </div>
     </div>
   );

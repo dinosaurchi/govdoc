@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { apiGet, apiPost } from '@/lib/api';
 import { useRole } from '@/hooks/use-role';
+import { WorkflowDocConnections } from '@/components/WorkflowDocConnections';
 
 type AIAnalysis = {
   stage: string;
@@ -361,10 +362,13 @@ export default function ResponsePage() {
 
         {selectedDoc ? (
           <Card className="lg:col-span-2 flex flex-col min-h-0 overflow-hidden">
-            <CardHeader className="border-b border-slate-100 flex flex-row items-center justify-between flex-shrink-0">
-              <CardTitle className="text-lg truncate pr-4">
-                Review Official Response: {selectedDoc.title}
-              </CardTitle>
+            <CardHeader className="border-b border-slate-100 flex flex-row items-start justify-between flex-shrink-0 gap-3">
+              <div className="min-w-0 flex-1 space-y-2 pr-2">
+                <CardTitle className="text-lg leading-snug">
+                  Review Official Response: {selectedDoc.title}
+                </CardTitle>
+                <WorkflowDocConnections docId={selectedDoc.id} current="response" />
+              </div>
               <div className="flex items-center gap-2 flex-shrink-0">
                 <Badge variant="outline" className="font-mono">{selectedDoc.status}</Badge>
               </div>
@@ -555,6 +559,18 @@ function ResponseCard({
             </span>
           )}
         </div>
+      </div>
+      <div
+        className="px-2 pb-2 pt-1 border-t border-slate-100"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        <WorkflowDocConnections
+          docId={doc.id}
+          current="response"
+          dense
+          onLinkClick={(e) => e.stopPropagation()}
+        />
       </div>
     </div>
   );

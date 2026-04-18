@@ -26,6 +26,7 @@ import {
   Building2,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { WorkflowDocConnections } from '@/components/WorkflowDocConnections';
 import { apiGet, apiPost } from '@/lib/api';
 import { formatBytes } from '@/lib/format';
 import { useRole } from '@/hooks/use-role';
@@ -334,40 +335,43 @@ function DocumentDetailInner({ id }: { id: string }) {
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-20 animate-in fade-in duration-500">
-      <div className="flex items-center gap-4">
-        <Link to="/review" className="p-2 hover:bg-slate-100 rounded-full transition">
+      <div className="flex items-start gap-4">
+        <Link to="/review" className="p-2 hover:bg-slate-100 rounded-full transition shrink-0">
           <ArrowLeft size={20} />
         </Link>
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-black tracking-tight text-slate-900">{doc.title}</h1>
-            {doc.urgency !== 'normal' && (
-              <Badge className={`uppercase text-[10px] font-black ${doc.urgency === 'critical' ? 'bg-red-600' : 'bg-orange-500'}`}>
-                {doc.urgency}
-              </Badge>
-            )}
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-2xl font-black tracking-tight text-slate-900">{doc.title}</h1>
+                {doc.urgency !== 'normal' && (
+                  <Badge className={`uppercase text-[10px] font-black ${doc.urgency === 'critical' ? 'bg-red-600' : 'bg-orange-500'}`}>
+                    {doc.urgency}
+                  </Badge>
+                )}
+              </div>
+              <p className="text-slate-500 text-sm font-medium">
+                Created: {new Date(doc.created_at).toLocaleString()}
+                {doc.issuing_agency && <> · From: {doc.issuing_agency}</>}
+              </p>
+              <p
+                className="text-slate-600 text-sm font-medium flex items-center gap-1.5 mt-1"
+                data-testid="document-assigned-department"
+              >
+                <Building2 size={14} className="text-slate-400" />
+                <span className="text-slate-500">Assigned to:</span>
+                {doc.assigned_department_id ? (
+                  <span className="font-bold text-slate-800">{displayDepartment(doc.assigned_department_id)}</span>
+                ) : (
+                  <span className="italic text-slate-400">Not yet assigned</span>
+                )}
+              </p>
+            </div>
+            <Badge className="px-4 py-1 text-sm font-bold capitalize shrink-0">
+              {doc.status.replace(/_/g, ' ')}
+            </Badge>
           </div>
-          <p className="text-slate-500 text-sm font-medium">
-            Created: {new Date(doc.created_at).toLocaleString()}
-            {doc.issuing_agency && <> · From: {doc.issuing_agency}</>}
-          </p>
-          <p
-            className="text-slate-600 text-sm font-medium flex items-center gap-1.5 mt-1"
-            data-testid="document-assigned-department"
-          >
-            <Building2 size={14} className="text-slate-400" />
-            <span className="text-slate-500">Assigned to:</span>
-            {doc.assigned_department_id ? (
-              <span className="font-bold text-slate-800">{displayDepartment(doc.assigned_department_id)}</span>
-            ) : (
-              <span className="italic text-slate-400">Not yet assigned</span>
-            )}
-          </p>
-        </div>
-        <div className="ml-auto">
-          <Badge className="px-4 py-1 text-sm font-bold capitalize">
-            {doc.status.replace(/_/g, ' ')}
-          </Badge>
+          <WorkflowDocConnections docId={doc.id} current="document" />
         </div>
       </div>
 
