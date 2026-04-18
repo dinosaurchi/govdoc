@@ -802,10 +802,14 @@ test.describe('GovDoc E2E — Full document workflow', () => {
     await expect(context).toContainText('Acting as Department Reviewer');
     await expect(context).toContainText(/Status:/);
 
-    // There should be at least one action in "Next steps for you" for reviewer on this doc
+    // There should be at least one action block for reviewer on this doc.
+    // The block is either a "Recommended next step" (forward action) or
+    // an "Available actions"/"Alternatives" list when no forward exists.
     const available = page.locator('[data-testid="workflow-available-actions"]');
     if (await available.count() > 0) {
-      await expect(available).toContainText(/Next steps for you/i);
+      await expect(available).toContainText(
+        /Recommended next step|Available actions|Or, alternatives/i,
+      );
     }
 
     // --- Intake Clerk on the same doc: sees "waiting on" or "no actions" message ---

@@ -32,7 +32,6 @@ import { useRole } from '@/hooks/use-role';
 import {
   getWorkflowActionStates,
   getWorkflowStatusMessage,
-  ACTION_GROUP_LABELS,
   isTerminalStatus,
   toRoleId,
   toButtonVariant,
@@ -42,6 +41,8 @@ import {
   getNextStepHint,
   getActionsAvailableForOtherRoles,
   toFrontendRoleLabel,
+  partitionByForwardness,
+  getForwardActionId,
   ROLE_LABEL,
   type ButtonVariant,
   type Role,
@@ -267,8 +268,6 @@ function DocumentDetailInner({ id }: { id: string }) {
   const actionStates = terminal
     ? { available: [], disabled: [], hidden: [] }
     : getWorkflowActionStates(doc, roleId);
-
-  const actionGroupKeys = ['analysis', 'review', 'consultation', 'closeout'] as const;
 
   const getActionIcon = (actionId: string) => {
     switch (actionId) {
@@ -589,60 +588,91 @@ function DocumentDetailInner({ id }: { id: string }) {
                   data-testid="workflow-empty"
                 >
                   <p className="font-semibold text-slate-700">No actions for your role on this document.</p>
-                  <p className="mt-1 text-xs text-slate-500">{getNextStepHint(doc.status)}</p>
+                  <p className="mt-1 text-xs text-slate-500">{getNextStepHint(doc.status, roleId)}</p>
                 </div>
               ) : (
                 <>
-                  {/* Primary "next step" actions — available right now for the active role */}
-                  {actionStates.available.length > 0 && (
-                    <div className="space-y-3" data-testid="workflow-available-actions">
-                      <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 flex items-center gap-1">
-                        <Sparkles size={12} /> Next steps for you
-                      </p>
-                      {actionGroupKeys.map((groupKey) => {
-                        const groupItems = actionStates.available.filter((a) => a.group === groupKey);
-                        if (groupItems.length === 0) return null;
-                        return (
-                          <div key={groupKey} className="space-y-2">
-                            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                              {ACTION_GROUP_LABELS[groupKey]}
+                  {/* Primary "next step" actions — the forward action (if any) is
+                      promoted above alternatives so the user always knows which
+                      button advances the pipeline. */}
+                  {actionStates.available.length > 0 && (() => {
+                    // Hide supervisor-self-escalate noise, then partition
+                    const filtered = actionStates.available.filter((a) => {
+                      if (a.id === 'escalate' && roleId === 'supervisor') return false;
+                      return true;
+                    });
+                    const { forward, alternatives } = partitionByForwardness(
+                      filtered,
+                      doc.status,
+                      roleId,
+                    );
+                    const renderOne = (action: typeof filtered[number]) =>
+                      renderActionControl({
+                        action,
+                        isAvailable: true,
+                        reason: null,
+                        getActionIcon,
+                        showRerouteInput,
+                        setShowRerouteInput,
+                        rerouteDepartmentId,
+                        setRerouteDepartmentId,
+                        rerouteRationale,
+                        setRerouteRationale,
+                        availableDepartments,
+                        showConsultInput,
+                        setShowConsultInput,
+                        consultBody,
+                        setConsultBody,
+                        handleAction,
+                        actionLoading,
+                        doc,
+                      });
+                    return (
+                      <div className="space-y-4" data-testid="workflow-available-actions">
+                        {forward && (
+                          <div className="space-y-2" data-testid="workflow-forward-action">
+                            <div className="flex items-center gap-2">
+                              <Sparkles size={12} className="text-emerald-600" />
+                              <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700">
+                                Recommended next step
+                              </p>
+                            </div>
+                            <p className="text-xs text-slate-600 leading-relaxed">
+                              {forwardExplanation(forward.id)}
                             </p>
-                            {groupItems.map((action) =>
-                              renderActionControl({
-                                action,
-                                isAvailable: true,
-                                reason: null,
-                                getActionIcon,
-                                showRerouteInput,
-                                setShowRerouteInput,
-                                rerouteDepartmentId,
-                                setRerouteDepartmentId,
-                                rerouteRationale,
-                                setRerouteRationale,
-                                availableDepartments,
-                                showConsultInput,
-                                setShowConsultInput,
-                                consultBody,
-                                setConsultBody,
-                                handleAction,
-                                actionLoading,
-                                doc,
-                              }),
-                            )}
+                            {renderOne(forward)}
                           </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                        )}
 
-                  {/* Progression actions available to other roles — exposes the next owner */}
-                  <OtherRolesActions
-                    doc={doc}
-                    currentRoleId={roleId}
-                    onSwitchRole={(targetId) => {
-                      setRole(toFrontendRoleLabel(targetId) as typeof role);
-                    }}
-                  />
+                        {alternatives.length > 0 && (
+                          <div
+                            className="space-y-2 pt-1 border-t border-slate-100"
+                            data-testid="workflow-alternative-actions"
+                          >
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                              {forward ? 'Or, alternatives' : 'Available actions'}
+                            </p>
+                            <div className="space-y-2">
+                              {alternatives.map((a) => renderOne(a))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Progression actions available to other roles — only shown
+                      when the current role itself has no forward action (i.e.
+                      the user genuinely needs to hand off to another role). */}
+                  {getForwardActionId(doc.status, roleId) === null && (
+                    <OtherRolesActions
+                      doc={doc}
+                      currentRoleId={roleId}
+                      onSwitchRole={(targetId) => {
+                        setRole(toFrontendRoleLabel(targetId) as typeof role);
+                      }}
+                    />
+                  )}
 
                   {/* Disabled actions — role allows them, but status doesn't */}
                   {actionStates.disabled.length > 0 && (
@@ -963,6 +993,19 @@ function humanizeEnum(value: unknown): string {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function forwardExplanation(actionId: string): string {
+  switch (actionId) {
+    case 'approve-routing':
+      return 'Accept the AI-suggested routing and move the document into active review.';
+    case 'close':
+      return 'All review work is done — close the document to finalize the workflow.';
+    case 'resolve-consultation':
+      return 'Mark the consultation note as resolved so the document can continue.';
+    default:
+      return 'This is the action that most advances the workflow right now.';
+  }
+}
+
 function actionSuccessMessage(
   action: string,
   payload: Record<string, string>,
@@ -1134,7 +1177,7 @@ function WorkflowContext({
   hasAvailableActions: boolean;
 }) {
   const responsible = getResponsibleRoles(status);
-  const hint = getNextStepHint(status);
+  const hint = getNextStepHint(status, roleId);
   const statusMessage = getWorkflowStatusMessage(status);
   const needsOtherRole =
     !terminal && !hasAvailableActions && responsible.length > 0 && !responsible.includes(roleId);
@@ -1261,8 +1304,8 @@ function OtherRolesActions({
         To progress further, switch to another role:
       </p>
       <div className="space-y-2">
-        {groups.map(({ role: targetRole, actions }) => (
-          <div key={targetRole} className="rounded-lg bg-white border border-slate-200 p-2 space-y-1">
+        {groups.map(({ role: targetRole, forward }) => (
+          <div key={targetRole} className="rounded-lg bg-white border border-slate-200 p-2 space-y-1.5">
             <div className="flex items-center justify-between gap-2">
               <p className="text-sm font-bold text-slate-800">{ROLE_LABEL[targetRole]}</p>
               <button
@@ -1274,11 +1317,12 @@ function OtherRolesActions({
                 Switch role
               </button>
             </div>
-            <ul className="text-xs text-slate-600 list-disc list-inside space-y-0.5">
-              {actions.map((a) => (
-                <li key={a.id}>{a.label}</li>
-              ))}
-            </ul>
+            {forward && (
+              <p className="text-xs text-slate-600">
+                Can <span className="font-semibold text-slate-800">{forward.label}</span>
+                {' '}to move the workflow forward.
+              </p>
+            )}
           </div>
         ))}
       </div>

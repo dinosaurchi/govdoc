@@ -66,5 +66,18 @@ test('reroute surfaces assigned dept, success flash, latest routing callout, and
   const actingAs = page.getByTestId('workflow-context');
   await expect(actingAs).toContainText(/Supervisor/, { timeout: 5_000 });
 
-  await expect(page.getByRole('button', { name: /close document/i })).toBeVisible();
+  // Supervisor view promotes "Close document" as the Recommended next step.
+  const forward = page.getByTestId('workflow-forward-action');
+  await expect(forward).toBeVisible();
+  await expect(forward).toContainText(/Recommended next step/i);
+  await expect(forward).toContainText(/Close document/i);
+
+  // Other-role handoff CTA is hidden once the active role has a forward action.
+  await expect(page.getByTestId('other-roles-actions')).toHaveCount(0);
+
+  // Escalate to supervisor is hidden for a supervisor (self-escalation is a no-op).
+  await expect(page.getByRole('button', { name: /escalate to supervisor/i })).toHaveCount(0);
+
+  // Role-aware hint copy no longer says "A Reviewer must …"
+  await expect(actingAs).not.toContainText(/A Reviewer must/i);
 });

@@ -266,6 +266,60 @@ export interface ActionStates {
  * render a terminal-state message instead of the action panel.
  */
 /**
+ * Per (status, role), the id of the single action that most advances the
+ * workflow toward completion. `null` means there is no "forward" action
+ * for this role on this status — the user must hand off to another role
+ * (surfaced via `getActionsAvailableForOtherRoles`).
+ */
+const FORWARD_ACTION_BY_STATUS_ROLE: Record<string, Partial<Record<Role, string>>> = {
+  analyzed: { reviewer: 'approve-routing', supervisor: 'approve-routing' },
+  under_review: { supervisor: 'close' },
+  in_consultation: { reviewer: 'resolve-consultation', consultant: 'resolve-consultation', supervisor: 'resolve-consultation' },
+  approved: { supervisor: 'close' },
+};
+
+export function getForwardActionId(status: string, role: Role): string | null {
+  return FORWARD_ACTION_BY_STATUS_ROLE[status]?.[role] ?? null;
+}
+
+/** IDs that, when listed alongside others, look like "try again" branches
+ *  (they don't advance the pipeline to a terminal or approved state). */
+const ALTERNATIVE_ACTION_IDS: ReadonlySet<string> = new Set([
+  'reroute',
+  'request-consultation',
+  'mark-out-of-scope',
+  'escalate',
+]);
+
+export function isAlternativeAction(actionId: string): boolean {
+  return ALTERNATIVE_ACTION_IDS.has(actionId);
+}
+
+/**
+ * Split a list of available actions into the "forward" action (single,
+ * role+status-aware) and the remaining "alternative" actions in their
+ * original order. The forward slot is `null` when the role has no
+ * progression action for the current status.
+ */
+export function partitionByForwardness(
+  actions: WorkflowAction[],
+  status: string,
+  role: Role,
+): { forward: WorkflowAction | null; alternatives: WorkflowAction[] } {
+  const forwardId = getForwardActionId(status, role);
+  let forward: WorkflowAction | null = null;
+  const alternatives: WorkflowAction[] = [];
+  for (const a of actions) {
+    if (forwardId && a.id === forwardId && !forward) {
+      forward = a;
+    } else {
+      alternatives.push(a);
+    }
+  }
+  return { forward, alternatives };
+}
+
+/**
  * Returns, per *other* role, the progression actions that would be
  * available right now on this document if the user switched to that role.
  *
@@ -278,17 +332,24 @@ export interface ActionStates {
 export function getActionsAvailableForOtherRoles(
   doc: DocContext,
   currentRole: Role,
-): Array<{ role: Role; actions: WorkflowAction[] }> {
+): Array<{ role: Role; actions: WorkflowAction[]; forward: WorkflowAction | null }> {
   if (isTerminalStatus(doc.status)) return [];
-  const otherRoles: Role[] = (['reviewer', 'supervisor', 'consultant', 'intake_clerk'] as Role[]).filter(
+  const otherRoles: Role[] = (['supervisor', 'reviewer', 'consultant', 'intake_clerk'] as Role[]).filter(
     (r) => r !== currentRole,
   );
-  const result: Array<{ role: Role; actions: WorkflowAction[] }> = [];
+  const result: Array<{ role: Role; actions: WorkflowAction[]; forward: WorkflowAction | null }> = [];
   for (const role of otherRoles) {
-    const actions = WORKFLOW_ACTIONS.filter(
+    const all = WORKFLOW_ACTIONS.filter(
       (a) => a.allowedRoles.includes(role) && a.isAvailable(doc, role),
     );
-    if (actions.length > 0) result.push({ role, actions });
+    const forwardId = getForwardActionId(doc.status, role);
+    const forward = forwardId ? all.find((a) => a.id === forwardId) ?? null : null;
+    // Only show the other role if they have a *forward* (progressive) action.
+    // Listing "reroute / reroute / reroute" for every other role adds noise
+    // instead of helping the user understand the next owner.
+    if (forward) {
+      result.push({ role, actions: all, forward });
+    }
   }
   return result;
 }
@@ -467,8 +528,12 @@ export function getResponsibleRoles(status: string): Role[] {
 }
 
 /** Short next-step hint for the given status — rendered next to the status
- *  pill on the document detail page. */
-export function getNextStepHint(status: string): string {
+ *  pill on the document detail page. When `role` is provided the copy is
+ *  tailored to that role so the user isn't told "a Reviewer must act"
+ *  while they are already Supervisor. */
+export function getNextStepHint(status: string, role?: Role): string {
+  const roleHint = role ? getNextStepHintForRole(status, role) : null;
+  if (roleHint) return roleHint;
   switch (status) {
     case 'received':
       return 'Waiting for the system to finish extracting text from the file.';
@@ -495,4 +560,25 @@ export function getNextStepHint(status: string): string {
     default:
       return '';
   }
+}
+
+function getNextStepHintForRole(status: string, role: Role): string | null {
+  if (status === 'under_review') {
+    if (role === 'supervisor') return 'Review the routing decision, then close the document to finalize it.';
+    if (role === 'reviewer') return 'Review, request consultation, or hand off to a Supervisor to close.';
+  }
+  if (status === 'analyzed') {
+    if (role === 'reviewer' || role === 'supervisor') {
+      return 'Approve the AI-suggested routing, or reroute to a different department.';
+    }
+  }
+  if (status === 'in_consultation') {
+    if (role === 'reviewer' || role === 'consultant' || role === 'supervisor') {
+      return 'Resolve the consultation note to continue the workflow.';
+    }
+  }
+  if (status === 'approved' && role === 'supervisor') {
+    return 'Close the document to finalize it.';
+  }
+  return null;
 }
