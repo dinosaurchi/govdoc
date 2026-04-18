@@ -11,10 +11,13 @@ import {
   BrainCircuit,
   ArrowRight,
   ListChecks,
+  Download,
+  FileText,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { uploadDocument } from '@/lib/api';
+import { DEMO_SAMPLE_FILES, demoSampleFileUrl } from '@/lib/demo-samples';
 
 // ---------------------------------------------------------------------------
 // Stepper model
@@ -283,31 +286,71 @@ export default function IntakePage() {
           </CardContent>
         </Card>
 
-        <Card className="flex min-h-0 flex-col">
-          <CardHeader className="pb-4">
-            <CardTitle className="text-base">Intake Guidelines</CardTitle>
-          </CardHeader>
-          <CardContent className="flex-1 space-y-4 text-sm text-slate-600">
-            <div className="space-y-1">
-              <p className="font-bold text-slate-900">1. Verify Origin</p>
-              <p>Ensure the document is from an authorized sender or department.</p>
-            </div>
-            <div className="space-y-1">
-              <p className="font-bold text-slate-900">2. Upload &amp; Classify</p>
-              <p>
-                Text extraction and AI classification (doc type, urgency, department) run
-                automatically on upload.
+        <div className="flex min-h-0 flex-col gap-6">
+          <Card id="demo-samples" className="flex min-h-0 flex-col scroll-mt-24">
+            <CardHeader className="pb-4">
+              <CardTitle className="text-base">Demo sample files</CardTitle>
+              <p className="text-xs font-medium text-slate-500">
+                PDFs below match files under <code className="rounded bg-slate-100 px-1 py-0.5">./data/incoming/</code> in the
+                full data pack; they are bundled here for one-click demos.
               </p>
-            </div>
-            <div className="space-y-1">
-              <p className="font-bold text-slate-900">3. Review AI Output</p>
-              <p>
-                Open the Review queue to validate AI routing suggestions and take workflow
-                actions.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+            </CardHeader>
+            <CardContent className="flex-1 space-y-3 text-sm">
+              <ul className="space-y-3">
+                {DEMO_SAMPLE_FILES.map((f) => (
+                  <li key={f.filename} className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex items-center gap-2 font-semibold text-slate-900">
+                          <FileText className="h-4 w-4 shrink-0 text-red-600" aria-hidden />
+                          <span className="truncate">{f.title}</span>
+                        </div>
+                        <p className="text-xs text-slate-600">{f.description}</p>
+                        <p className="text-[11px] text-slate-400">
+                          <span className="font-medium text-slate-500">Source in data pack:</span> {f.dataPackSource}
+                        </p>
+                      </div>
+                      <a
+                        href={demoSampleFileUrl(f.filename)}
+                        download={f.filename}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-blue-600 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-blue-700"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        Get
+                      </a>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+
+          <Card className="flex min-h-0 flex-col">
+            <CardHeader className="pb-4">
+              <CardTitle className="text-base">Intake Guidelines</CardTitle>
+            </CardHeader>
+            <CardContent className="flex-1 space-y-4 text-sm text-slate-600">
+              <div className="space-y-1">
+                <p className="font-bold text-slate-900">1. Verify Origin</p>
+                <p>Ensure the document is from an authorized sender or department.</p>
+              </div>
+              <div className="space-y-1">
+                <p className="font-bold text-slate-900">2. Upload &amp; Classify</p>
+                <p>
+                  Text extraction and AI classification (doc type, urgency, department) run
+                  automatically on upload.
+                </p>
+              </div>
+              <div className="space-y-1">
+                <p className="font-bold text-slate-900">3. Review AI Output</p>
+                <p>
+                  Open the Review queue to validate AI routing suggestions and take workflow
+                  actions.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );

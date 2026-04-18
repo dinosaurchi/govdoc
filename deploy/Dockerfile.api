@@ -22,6 +22,10 @@ RUN pip install --no-cache-dir -r /app/api/requirements.txt
 COPY api/ /app/api/
 COPY data/ /app/demo-data/
 
+# Demo PDFs for /api/v1/demo/sample-files/* (same files as web/public/demo — web static can still serve /demo/)
+RUN mkdir -p /app/demo-sample-pdfs
+COPY web/public/demo/sample-cong-van-dong-nai.pdf web/public/demo/sample-bao-cao-dong-nai.pdf /app/demo-sample-pdfs/
+
 # Ensure Python can find the 'app' package inside api/
 ENV PYTHONPATH=/app/api
 

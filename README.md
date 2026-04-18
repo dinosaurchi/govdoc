@@ -1,6 +1,8 @@
-# GovDoc SecureFlow
-
-**AI-powered government document processing with intelligent routing, classification, and multi-role workflow.**
+<div align="center">
+  <img src="docs/logo.svg" alt="GovDoc SecureFlow Logo" width="120" height="120" />
+  <h1>GovDoc SecureFlow</h1>
+  <p><strong>AI-powered government document processing with intelligent routing, classification, and multi-role workflow.</strong></p>
+</div>
 
 ![Python](https://img.shields.io/badge/python-3.12-blue)
 ![React](https://img.shields.io/badge/react-19-61dafb)
@@ -50,6 +52,51 @@ The result: faster processing, fewer routing errors, built-in audit trails, and 
 - Complete action history for every document
 - Dashboard analytics showing processing metrics and bottlenecks
 - Filterable, searchable document archive
+
+---
+
+## Screenshots
+
+Overview of the main UI flows. **Click an image** to open the full-size file in the repository.
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Homepage Dashboard</th>
+      <th align="center">Upload &amp; Status Tracking</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center" valign="top">
+        <a href="docs/screenshots/1.homepage.png" title="Open full size — Homepage Dashboard">
+          <img src="docs/screenshots/1.homepage.png" alt="Homepage Dashboard" width="440" />
+        </a>
+      </td>
+      <td align="center" valign="top">
+        <a href="docs/screenshots/2.upload-status.png" title="Open full size — Upload &amp; status">
+          <img src="docs/screenshots/2.upload-status.png" alt="Upload and document status tracking" width="440" />
+        </a>
+      </td>
+    </tr>
+    <tr>
+      <th align="center">AI Classification &amp; Analysis</th>
+      <th align="center">Consultation Workflow</th>
+    </tr>
+    <tr>
+      <td align="center" valign="top">
+        <a href="docs/screenshots/3.classification.png" title="Open full size — Classification">
+          <img src="docs/screenshots/3.classification.png" alt="AI classification and analysis" width="440" />
+        </a>
+      </td>
+      <td align="center" valign="top">
+        <a href="docs/screenshots/4.consultantion.png" title="Open full size — Consultation">
+          <img src="docs/screenshots/4.consultantion.png" alt="Consultation workflow between departments" width="440" />
+        </a>
+      </td>
+    </tr>
+  </tbody>
+</table>
 
 ---
 

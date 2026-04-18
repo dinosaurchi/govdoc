@@ -3,6 +3,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui-card';
 import { BarChart3, PieChart, TrendingUp, Users, FileCheck, Layers } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { useRole } from '@/hooks/use-role';
+import { DemoWalkthrough } from '@/components/demo-walkthrough';
 
 type DashboardMetrics = {
   total_received: number;
@@ -86,6 +87,8 @@ export default function DashboardPage() {
           <p className="text-slate-500">Real-time metrics for GovDoc SecureFlow.</p>
         </div>
       </div>
+
+      <DemoWalkthrough />
 
       <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
         {stats.map((stat) => (
