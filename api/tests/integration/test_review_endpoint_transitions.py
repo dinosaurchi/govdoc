@@ -95,3 +95,90 @@ class TestReviewEndpointTransitions:
 
         assert response.status_code == 400
         assert response.json()["detail"]["error"]["code"] == "INVALID_TRANSITION"
+
+    def test_resolve_consultation_keeps_status_while_other_notes_open(
+        self, client: TestClient
+    ):
+        """Parallel consultations: resolving one of two open notes must keep
+        the document on `in_consultation` until every note is handled."""
+        document_id = _create_document(client)
+        note_a_id = str(uuid.uuid4())
+        note_b_id = str(uuid.uuid4())
+
+        db = SessionLocal()
+        try:
+            document = db.query(Document).filter(Document.id == document_id).one()
+            document.status = DocumentStatus.in_consultation
+            db.add_all(
+                [
+                    ConsultationNote(
+                        id=note_a_id,
+                        document_id=document_id,
+                        author_role="reviewer",
+                        target_role="consultant",
+                        body="Note A",
+                    ),
+                    ConsultationNote(
+                        id=note_b_id,
+                        document_id=document_id,
+                        author_role="reviewer",
+                        target_role="consultant",
+                        body="Note B",
+                    ),
+                ]
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        first = client.post(
+            f"/api/v1/documents/{document_id}/resolve-consultation/{note_a_id}",
+            headers={"X-GovDoc-Role": "consultant"},
+        )
+        assert first.status_code == 200, first.text
+        assert first.json()["document"]["status"] == "in_consultation"
+        assert first.json()["consultation_note"]["resolved_at"] is not None
+
+        second = client.post(
+            f"/api/v1/documents/{document_id}/resolve-consultation/{note_b_id}",
+            headers={"X-GovDoc-Role": "consultant"},
+        )
+        assert second.status_code == 200, second.text
+        assert second.json()["document"]["status"] == "under_review"
+
+    def test_resolve_consultation_is_idempotent_for_already_resolved_notes(
+        self, client: TestClient
+    ):
+        """Re-resolving an already-resolved note is a 400 — no silent retry."""
+        document_id = _create_document(client)
+        note_id = str(uuid.uuid4())
+
+        db = SessionLocal()
+        try:
+            document = db.query(Document).filter(Document.id == document_id).one()
+            document.status = DocumentStatus.in_consultation
+            db.add(
+                ConsultationNote(
+                    id=note_id,
+                    document_id=document_id,
+                    author_role="reviewer",
+                    target_role="consultant",
+                    body="Already done",
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        first = client.post(
+            f"/api/v1/documents/{document_id}/resolve-consultation/{note_id}",
+            headers={"X-GovDoc-Role": "consultant"},
+        )
+        assert first.status_code == 200
+
+        retry = client.post(
+            f"/api/v1/documents/{document_id}/resolve-consultation/{note_id}",
+            headers={"X-GovDoc-Role": "consultant"},
+        )
+        assert retry.status_code == 400
+        assert retry.json()["detail"]["error"]["code"] == "INVALID_TRANSITION"

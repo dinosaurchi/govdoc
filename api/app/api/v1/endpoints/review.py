@@ -188,10 +188,13 @@ async def resolve_consultation(
             detail={"error": {"code": "INVALID_TRANSITION", "message": "Note already resolved", "details": {}}},
         )
 
-    note.resolved_at = func.now()
     document = db.query(Document).filter(Document.id == document_id).first()
     if document:
-        old_status = document.status.value
+        # Guard against resolving notes on documents in terminal states.
+        # The only statuses where resolving a note makes sense are
+        # `in_consultation` (the normal case) and `under_review` (a prior
+        # run of this endpoint already flipped the doc back but an earlier
+        # bug left sibling notes open — resolving them is still valid).
         try:
             validate_transition(document.status, DocumentStatus.under_review)
         except InvalidTransitionError as e:
@@ -200,15 +203,43 @@ async def resolve_consultation(
                 detail={"error": {"code": "INVALID_TRANSITION", "message": str(e), "details": {}}},
             )
 
-        document.status = DocumentStatus.under_review
-        write_audit_event(
-            db,
-            document_id=document_id,
-            actor_role=role.id,
-            event_type="workflow.transition",
-            from_state=old_status,
-            to_state="under_review",
+    note.resolved_at = func.now()
+    # `flush` so the just-resolved note's `resolved_at` is visible to the
+    # subsequent "are there still open notes?" query below.
+    db.flush()
+
+    if document:
+        unresolved_remaining = (
+            db.query(ConsultationNote)
+            .filter(
+                ConsultationNote.document_id == document_id,
+                ConsultationNote.resolved_at.is_(None),
+            )
+            .count()
         )
+
+        # Only flip back to `under_review` once every open note has been
+        # resolved. In a parallel-consultation scenario (e.g. reviewer
+        # asked both Legal and Consultant) resolving a single note should
+        # leave the document on `in_consultation` until the last one is
+        # handled. If the document is already on `under_review` (data
+        # drift from an older buggy run), just resolve the note and leave
+        # the status alone.
+        if (
+            unresolved_remaining == 0
+            and document.status == DocumentStatus.in_consultation
+        ):
+            old_status = document.status.value
+            document.status = DocumentStatus.under_review
+            write_audit_event(
+                db,
+                document_id=document_id,
+                actor_role=role.id,
+                event_type="workflow.transition",
+                from_state=old_status,
+                to_state="under_review",
+                metadata_json={"resolved_note_id": note_id},
+            )
     db.commit()
     return {"document": document, "consultation_note": note}
 
