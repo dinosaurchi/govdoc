@@ -56,21 +56,33 @@ test('reroute surfaces assigned dept, success flash, latest routing callout, and
   await expect(callout).toContainText(targetName);
   await expect(callout).toContainText(/reviewer/i);
 
+  // GET as reviewer promotes `routed` → `under_review` so the doc is in a state
+  // where a Supervisor can act.
+  await page.reload();
+  await page.waitForLoadState('networkidle');
+
+  // "Next owner" CTA only renders when the current role has no *forward* action.
+  // Reviewers now have "Approve document" as their forward on `under_review`, so
+  // view as Consultant — read-only for this queue — to surface the handoff CTA.
+  await page.evaluate(() => localStorage.setItem('govdoc_role', 'Consultant'));
+  await page.reload();
+  await page.waitForLoadState('networkidle');
+
   const otherRoles = page.getByTestId('other-roles-actions');
   await expect(otherRoles).toBeVisible();
   await expect(otherRoles).toContainText('Supervisor');
-  await expect(otherRoles).toContainText(/close document/i);
+  await expect(otherRoles).toContainText(/approve document/i);
 
   await page.getByTestId('switch-to-supervisor').click();
 
   const actingAs = page.getByTestId('workflow-context');
   await expect(actingAs).toContainText(/Supervisor/, { timeout: 5_000 });
 
-  // Supervisor view promotes "Close document" as the Recommended next step.
+  // Supervisor view promotes "Approve document" as the Recommended next step.
   const forward = page.getByTestId('workflow-forward-action');
   await expect(forward).toBeVisible();
   await expect(forward).toContainText(/Recommended next step/i);
-  await expect(forward).toContainText(/Close document/i);
+  await expect(forward).toContainText(/Approve document/i);
 
   // Other-role handoff CTA is hidden once the active role has a forward action.
   await expect(page.getByTestId('other-roles-actions')).toHaveCount(0);

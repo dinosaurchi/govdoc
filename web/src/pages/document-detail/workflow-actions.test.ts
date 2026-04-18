@@ -16,6 +16,7 @@ import {
   canEscalate,
   canMarkOutOfScope,
   canClose,
+  canApprove,
   getWorkflowActionStates,
   getWorkflowStatusMessage,
   getForwardActionId,
@@ -232,16 +233,13 @@ describe('canMarkOutOfScope', () => {
 // ---------------------------------------------------------------------------
 
 describe('canClose', () => {
-  it('returns true for under_review', () => {
-    expect(canClose(doc({ status: 'under_review' }))).toBe(true);
-  });
-
-  it('returns true for in_consultation', () => {
-    expect(canClose(doc({ status: 'in_consultation' }))).toBe(true);
-  });
-
-  it('returns true for approved', () => {
+  it('returns true only for approved (archive step)', () => {
     expect(canClose(doc({ status: 'approved' }))).toBe(true);
+  });
+
+  it('returns false for under_review and in_consultation', () => {
+    expect(canClose(doc({ status: 'under_review' }))).toBe(false);
+    expect(canClose(doc({ status: 'in_consultation' }))).toBe(false);
   });
 
   it('returns false for analyzed', () => {
@@ -255,6 +253,29 @@ describe('canClose', () => {
   it('returns false for non-terminal statuses outside the allowed set', () => {
     expect(canClose(doc({ status: 'routed' }))).toBe(false);
     expect(canClose(doc({ status: 'received' }))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// canApprove
+// ---------------------------------------------------------------------------
+
+describe('canApprove', () => {
+  it('returns true for under_review or in_consultation with no open notes', () => {
+    expect(canApprove(doc({ status: 'under_review', consultation_notes: [] }))).toBe(true);
+    expect(
+      canApprove(doc({ status: 'in_consultation', consultation_notes: resolvedNotes })),
+    ).toBe(true);
+  });
+
+  it('returns false when consultation notes are open', () => {
+    expect(
+      canApprove(doc({ status: 'under_review', consultation_notes: unresolvedNotes })),
+    ).toBe(false);
+  });
+
+  it('returns false for approved', () => {
+    expect(canApprove(doc({ status: 'approved' }))).toBe(false);
   });
 });
 
@@ -280,10 +301,11 @@ describe('getWorkflowActionStates', () => {
     expect(ids).not.toContain('close'); // supervisor-only
   });
 
-  it('shows request-consultation as available for reviewer on under_review doc', () => {
+  it('shows request-consultation and approve as available for reviewer on under_review doc', () => {
     const states = getWorkflowActionStates(doc({ status: 'under_review' }), 'reviewer');
     const availableIds = states.available.map((a) => a.id);
     expect(availableIds).toContain('request-consultation');
+    expect(availableIds).toContain('approve');
     // approve-routing should be disabled (not analyzed)
     const disabledIds = states.disabled.map((d) => d.action.id);
     expect(disabledIds).toContain('approve-routing');
@@ -419,13 +441,22 @@ describe('getWorkflowStatusMessage', () => {
 // ---------------------------------------------------------------------------
 
 describe('getForwardActionId', () => {
-  it('returns close for supervisor on under_review with an assigned department', () => {
+  it('returns approve for supervisor on under_review with an assigned department', () => {
     expect(
       getForwardActionId(
         doc({ status: 'under_review', assigned_department_id: 'phong_tai_chinh' }),
         'supervisor',
       ),
-    ).toBe('close');
+    ).toBe('approve');
+  });
+
+  it('returns approve for reviewer on under_review', () => {
+    expect(
+      getForwardActionId(
+        doc({ status: 'under_review', assigned_department_id: 'phong_tai_chinh' }),
+        'reviewer',
+      ),
+    ).toBe('approve');
   });
 
   it('returns reroute for supervisor on under_review when no department is assigned', () => {
@@ -444,14 +475,29 @@ describe('getForwardActionId', () => {
   });
 
   it('string-arg overload still works (legacy callers)', () => {
-    expect(getForwardActionId('under_review', 'supervisor')).toBe('close');
+    expect(getForwardActionId('under_review', 'supervisor')).toBe('approve');
     expect(getForwardActionId('analyzed', 'reviewer')).toBe('approve-routing');
     expect(getForwardActionId('in_consultation', 'consultant')).toBe('resolve-consultation');
   });
 
   it('returns null for roles without a forward action', () => {
-    expect(getForwardActionId('under_review', 'reviewer')).toBeNull();
+    expect(getForwardActionId('under_review', 'intake_clerk')).toBeNull();
     expect(getForwardActionId('closed', 'supervisor')).toBeNull();
+  });
+
+  it('in_consultation with no open notes recommends approve for reviewer/supervisor', () => {
+    expect(
+      getForwardActionId(
+        doc({ status: 'in_consultation', consultation_notes: resolvedNotes }),
+        'reviewer',
+      ),
+    ).toBe('approve');
+    expect(
+      getForwardActionId(
+        doc({ status: 'in_consultation', consultation_notes: resolvedNotes }),
+        'supervisor',
+      ),
+    ).toBe('approve');
   });
 });
 
@@ -477,12 +523,12 @@ describe('getNextStepHint with DocContext', () => {
     expect(hint).toMatch(/reroute/i);
   });
 
-  it('keeps the normal supervisor close hint when under_review has a department', () => {
+  it('tells supervisor to approve (then close) when under_review has a department', () => {
     const hint = getNextStepHint(
       doc({ status: 'under_review', assigned_department_id: 'phong_tai_chinh' }),
       'supervisor',
     );
-    expect(hint).toMatch(/close/i);
+    expect(hint).toMatch(/approve/i);
   });
 
   it('string-arg overload falls back to status-only hints', () => {

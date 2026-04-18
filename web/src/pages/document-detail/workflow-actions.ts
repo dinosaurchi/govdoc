@@ -119,13 +119,16 @@ export function canMarkOutOfScope(doc: DocContext): boolean {
   );
 }
 
-/** Supervisor only, status must be under_review, in_consultation, or approved. */
+/** Supervisor only — archives an already-approved document. */
 export function canClose(doc: DocContext): boolean {
-  return (
-    doc.status === 'under_review' ||
-    doc.status === 'in_consultation' ||
-    doc.status === 'approved'
-  );
+  return doc.status === 'approved';
+}
+
+/** Reviewer/supervisor — formal approval before close (no open consultation notes). */
+export function canApprove(doc: DocContext): boolean {
+  if (doc.status !== 'under_review' && doc.status !== 'in_consultation') return false;
+  if (hasUnresolvedNotes(doc)) return false;
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -199,6 +202,23 @@ const WORKFLOW_ACTIONS: readonly WorkflowAction[] = [
     },
   },
   {
+    id: 'approve',
+    label: 'Approve document',
+    group: 'closeout',
+    variant: 'success',
+    allowedRoles: ['reviewer', 'supervisor'],
+    isAvailable: canApprove,
+    getDisabledReason: (doc) => {
+      if (doc.status !== 'under_review' && doc.status !== 'in_consultation') {
+        return 'Only available while under review or in consultation';
+      }
+      if (hasUnresolvedNotes(doc)) {
+        return 'Resolve open consultation notes before approving';
+      }
+      return null;
+    },
+  },
+  {
     id: 'escalate',
     label: 'Escalate to supervisor',
     group: 'review',
@@ -237,12 +257,8 @@ const WORKFLOW_ACTIONS: readonly WorkflowAction[] = [
     allowedRoles: ['supervisor'],
     isAvailable: canClose,
     getDisabledReason: (doc) => {
-      if (
-        doc.status !== 'under_review' &&
-        doc.status !== 'in_consultation' &&
-        doc.status !== 'approved'
-      ) {
-        return 'Only available when document is under review, in consultation, or approved';
+      if (doc.status !== 'approved') {
+        return 'Only available after the document has been approved';
       }
       return null;
     },
@@ -274,7 +290,7 @@ export interface ActionStates {
  */
 const FORWARD_ACTION_BY_STATUS_ROLE: Record<string, Partial<Record<Role, string>>> = {
   analyzed: { reviewer: 'approve-routing', supervisor: 'approve-routing' },
-  under_review: { supervisor: 'close' },
+  under_review: { reviewer: 'approve', supervisor: 'approve' },
   in_consultation: { reviewer: 'resolve-consultation', consultant: 'resolve-consultation', supervisor: 'resolve-consultation' },
   approved: { supervisor: 'close' },
 };
@@ -303,8 +319,20 @@ export function getForwardActionId(
     role === 'supervisor' &&
     !doc.assigned_department_id
   ) {
-    // No owner picked yet — recommend rerouting instead of closing.
+    // No owner picked yet — recommend rerouting instead of approving/closing.
     return 'reroute';
+  }
+
+  // In consultation: resolving open notes takes priority; once notes are
+  // cleared but status is still `in_consultation`, recommend approval.
+  if (doc && status === 'in_consultation') {
+    if (hasUnresolvedNotes(doc)) {
+      return FORWARD_ACTION_BY_STATUS_ROLE.in_consultation?.[role] ?? null;
+    }
+    if (role === 'reviewer' || role === 'supervisor') {
+      return 'approve';
+    }
+    return null;
   }
 
   return FORWARD_ACTION_BY_STATUS_ROLE[status]?.[role] ?? null;
@@ -475,7 +503,7 @@ export function getWorkflowStatusMessage(status: string): string {
     case 'in_consultation':
       return 'This document is in consultation. Resolve the consultation to continue.';
     case 'approved':
-      return 'This document has been approved. A supervisor can close it.';
+      return 'This document has been approved. A supervisor can close it to archive.';
     default:
       return '';
   }
@@ -512,7 +540,7 @@ export const PIPELINE_STAGES: readonly { id: string; label: string; description:
   { id: 'routed', label: 'Routed', description: 'Awaiting reviewer claim.' },
   { id: 'under_review', label: 'Under Review', description: 'Reviewer handling the document.' },
   { id: 'in_consultation', label: 'In Consultation', description: 'Cross-department consultation in progress.' },
-  { id: 'approved', label: 'Approved', description: 'Approved by a supervisor.' },
+  { id: 'approved', label: 'Approved', description: 'Formal approval recorded; ready to archive.' },
   { id: 'closed', label: 'Closed', description: 'File closed. No further actions.' },
 ] as const;
 
@@ -579,7 +607,7 @@ export function getNextStepHint(
     case 'routed':
       return 'A Reviewer must open this document to begin review (assignment happens on open).';
     case 'under_review':
-      return 'A Reviewer must approve, reroute, request consultation, or mark out of scope.';
+      return 'A Reviewer or Supervisor must approve the document (or reroute / consult) before it can be closed.';
     case 'in_consultation':
       return 'The Consultant (or the Reviewer) must resolve the open consultation note to continue.';
     case 'approved':
@@ -606,14 +634,18 @@ function getNextStepHintForRole(
     if (doc && !doc.assigned_department_id) {
       // No owning department — rerouting is the first real next step.
       if (role === 'supervisor') {
-        return 'No department has been assigned yet — reroute to a department before closing.';
+        return 'No department has been assigned yet — reroute to a department before approving.';
       }
       if (role === 'reviewer') {
         return 'No department has been assigned yet — reroute to a department, or hand off to a Supervisor.';
       }
     }
-    if (role === 'supervisor') return 'Review the routing decision, then close the document to finalize it.';
-    if (role === 'reviewer') return 'Review, request consultation, or hand off to a Supervisor to close.';
+    if (role === 'supervisor') {
+      return 'Approve the document when satisfied, then close it to archive (or use alternatives below).';
+    }
+    if (role === 'reviewer') {
+      return 'Approve when review is complete, request consultation if needed, or hand off to a Supervisor.';
+    }
   }
   if (status === 'analyzed') {
     if (role === 'reviewer' || role === 'supervisor') {

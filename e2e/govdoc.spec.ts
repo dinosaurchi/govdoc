@@ -431,24 +431,39 @@ test.describe('GovDoc E2E — Full document workflow', () => {
   // =========================================================================
   // Step 8 — Close document works
   // =========================================================================
-  test('Step 8: Close document works', async ({ page }) => {
+  test('Step 8: Approve then close document works', async ({ page }) => {
     await page.goto('/');
     await idle(page);
     await switchRole(page, 'Supervisor');
 
-    // Navigate to review queue and open first doc
-    const docId = await openFirstDocument(page);
+    await page.locator('nav').getByText('Review', { exact: true }).click();
+    await expect(page).toHaveURL(/\/review$/);
+    await idle(page);
+    const row = page.locator('table tbody tr').filter({ hasText: /Under Review/i }).first();
+    await expect(row).toBeVisible({ timeout: 15000 });
+    await row.click();
+    await expect(page).toHaveURL(/\/documents\/[^/]+$/);
+    await idle(page);
+
+    const approveBtn = page.getByRole('button', { name: /Approve document/i });
+    await expect(approveBtn).toBeVisible({ timeout: 5000 });
+    const [approveResp] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes('/approve') && r.request().method() === 'POST' && !r.url().includes('approve-routing'),
+      ),
+      approveBtn.click(),
+    ]);
+    expect([200, 204]).toContain(approveResp.status());
+
     await page.waitForTimeout(1000);
 
-    // Close document button is active for Supervisor
     const closeBtn = page.getByRole('button', { name: /Close document/i });
     await expect(closeBtn).toBeVisible({ timeout: 5000 });
-
-    const [resp] = await Promise.all([
-      page.waitForResponse(r => r.url().includes('/close') && r.request().method() === 'POST'),
+    const [closeResp] = await Promise.all([
+      page.waitForResponse((r) => r.url().includes('/close') && r.request().method() === 'POST'),
       closeBtn.click(),
     ]);
-    expect([200, 204]).toContain(resp.status());
+    expect([200, 204]).toContain(closeResp.status());
 
     await page.waitForTimeout(2000);
     await expect(page.getByRole('heading').first()).toBeVisible();

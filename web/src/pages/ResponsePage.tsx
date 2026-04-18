@@ -164,7 +164,15 @@ export default function ResponsePage() {
     if (!selectedDoc) return;
     setActionLoading(true);
     try {
-      await apiPost(`/documents/${selectedDoc.id}/close`, undefined, role);
+      // Formal approval and archival are separate API steps; this button
+      // chains them so supervisors still get a one-click "Approve & Close"
+      // from the response queue.
+      if (selectedDoc.status !== 'approved' && selectedDoc.status !== 'closed') {
+        await apiPost(`/documents/${selectedDoc.id}/approve`, undefined, role);
+      }
+      if (selectedDoc.status !== 'closed') {
+        await apiPost(`/documents/${selectedDoc.id}/close`, undefined, role);
+      }
       await fetchResponses();
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Action failed');

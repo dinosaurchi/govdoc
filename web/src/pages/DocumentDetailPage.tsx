@@ -220,6 +220,8 @@ function DocumentDetailInner({ id }: { id: string }) {
         await apiPost(`/documents/${id}/escalate`, undefined, role);
       } else if (action === 'mark-out-of-scope') {
         await apiPost(`/documents/${id}/mark-out-of-scope`, undefined, role);
+      } else if (action === 'approve') {
+        await apiPost(`/documents/${id}/approve`, undefined, role);
       } else if (action === 'close') {
         await apiPost(`/documents/${id}/close`, undefined, role);
       } else if (action === 'request-consultation') {
@@ -276,6 +278,7 @@ function DocumentDetailInner({ id }: { id: string }) {
       case 'reroute': return <Send size={16} />;
       case 'request-consultation': return <MessageSquare size={16} />;
       case 'resolve-consultation': return <CheckCircle2 size={16} />;
+      case 'approve': return <CheckCircle2 size={16} />;
       case 'escalate': return <AlertTriangle size={16} />;
       case 'mark-out-of-scope': return <Send size={16} />;
       case 'close': return <CheckCircle2 size={16} />;
@@ -1000,8 +1003,10 @@ function forwardExplanation(actionId: string): string {
   switch (actionId) {
     case 'approve-routing':
       return 'Accept the AI-suggested routing and move the document into active review.';
+    case 'approve':
+      return 'Record formal approval — after this, a Supervisor can close the document to archive it.';
     case 'close':
-      return 'All review work is done — close the document to finalize the workflow.';
+      return 'Archive the approved document and end the workflow.';
     case 'resolve-consultation':
       return 'Mark the consultation note as resolved so the document can continue.';
     case 'reroute':
@@ -1023,6 +1028,8 @@ function actionSuccessMessage(
   switch (action) {
     case 'approve-routing':
       return 'Routing approved. Document is now under review.';
+    case 'approve':
+      return 'Document approved. A Supervisor can now close it to archive.';
     case 'reroute': {
       const name = deptName(payload.department_id);
       return name ? `Document rerouted to ${name}.` : 'Document rerouted.';
@@ -1362,7 +1369,12 @@ function OtherRolesActions({
   onSwitchRole: (roleId: Role) => void;
 }) {
   const groups = getActionsAvailableForOtherRoles(
-    { status: doc.status, analyses: doc.analyses, consultation_notes: doc.consultation_notes },
+    {
+      status: doc.status,
+      analyses: doc.analyses,
+      consultation_notes: doc.consultation_notes,
+      assigned_department_id: doc.assigned_department_id,
+    },
     currentRoleId,
   );
   if (groups.length === 0) return null;
