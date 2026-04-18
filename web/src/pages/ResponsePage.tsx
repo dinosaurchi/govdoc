@@ -13,6 +13,7 @@ import {
   Clock,
   Search,
   AlertTriangle,
+  Info,
 } from 'lucide-react';
 import { apiGet, apiPost } from '@/lib/api';
 import { useRole } from '@/hooks/use-role';
@@ -241,6 +242,35 @@ export default function ResponsePage() {
         </div>
       </div>
 
+      <div
+        className="rounded-xl border border-emerald-100 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-950 mb-4 shrink-0 max-w-4xl"
+        role="region"
+        aria-label="How this queue works"
+        data-testid="response-page-explainer"
+      >
+        <p className="font-bold text-emerald-900 mb-2 flex items-center gap-2">
+          <Info size={16} className="shrink-0" /> How you get a result here
+        </p>
+        <ul className="text-xs text-emerald-900/90 space-y-1.5 list-disc pl-4 leading-relaxed">
+          <li>
+            <strong>Pending</strong> lists documents that are <strong>under review</strong> or{' '}
+            <strong>approved</strong> but not yet archived. As a <strong>Supervisor</strong>, open one
+            and click <strong>Approve &amp; Close</strong> (or approve + close from the document page — same
+            outcome).
+          </li>
+          <li>
+            <strong>After Close</strong>, the case moves from Pending to <strong>Dispatched</strong> in the
+            left sidebar. The draft preview with the <strong>CLOSED</strong> stamp is the completed outcome on
+            this page — scroll to <strong>Dispatched</strong> if you closed the document from Review or
+            document detail.
+          </li>
+          <li>
+            Nothing here yet? Only documents that have reached <strong>under review</strong> (or later)
+            appear. Roles that cannot list documents will see an empty queue.
+          </li>
+        </ul>
+      </div>
+
       <div className="grid lg:grid-cols-3 gap-6 flex-1 min-h-0">
         {/* ----------------------------------------------------- Sidebar */}
         <aside
@@ -266,9 +296,13 @@ export default function ResponsePage() {
             data-testid="response-list"
           >
             {documents.length === 0 ? (
-              <div className="p-8 text-center bg-white border border-dashed rounded-2xl text-slate-400">
+              <div className="p-8 text-center bg-white border border-dashed rounded-2xl text-slate-500 space-y-2">
                 <FileCheck className="mx-auto mb-2 text-slate-300" size={28} />
-                <p className="text-xs font-medium">No documents awaiting response finalization.</p>
+                <p className="text-xs font-bold text-slate-700">No documents in this queue</p>
+                <p className="text-[11px] leading-relaxed max-w-xs mx-auto">
+                  Items appear when status is <strong>under review</strong>, <strong>approved</strong>, or{' '}
+                  <strong>closed</strong>. Earlier pipeline stages stay on Intake / Review only.
+                </p>
               </div>
             ) : (
               <>
