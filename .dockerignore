@@ -4,6 +4,7 @@ data/**
 !data/incoming/
 !data/incoming/cong-van/
 !data/incoming/cong-van/cong-van_quang-ngai_son-mai_dang-ky-mua-sam-xe-o-to.pdf
+!data/reference_chunks.json
 !data/hard-cases/
 !data/hard-cases/multi-department/
 !data/hard-cases/multi-department/01_cong-van_moj_y-kien-co-quan.pdf

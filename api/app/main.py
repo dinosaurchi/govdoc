@@ -30,6 +30,7 @@ from app.services.workflow import InvalidTransitionError
 # main.py is at: api/app/main.py  → 2 parents up = api/ , 3 = project root
 _API_ROOT = Path(__file__).resolve().parent.parent  # api/
 _PROJECT_ROOT = _API_ROOT.parent  # govdoc/
+_PACKAGED_DEMO_DATA_ROOT = Path("/app/demo-data")
 
 
 @asynccontextmanager
@@ -61,11 +62,13 @@ async def lifespan(_app: FastAPI):
     # Load reference corpus if seeded (data/reference_chunks.json).
     # Absent file → empty corpus; evidence panel degrades gracefully.
     ref_path = _PROJECT_ROOT / "data" / "reference_chunks.json"
-    if ref_path.exists():
+    packaged_ref_path = _PACKAGED_DEMO_DATA_ROOT / "reference_chunks.json"
+    corpus_path = ref_path if ref_path.exists() else packaged_ref_path
+    if corpus_path.exists():
         try:
-            chunks = json.loads(ref_path.read_text(encoding="utf-8"))
+            chunks = json.loads(corpus_path.read_text(encoding="utf-8"))
             retrieval_svc.set_references(chunks)
-            print(f"retrieval: loaded {len(chunks)} reference chunks", file=sys.stderr)
+            print(f"retrieval: loaded {len(chunks)} reference chunks from {corpus_path}", file=sys.stderr)
         except Exception as exc:
             print(f"retrieval: failed to load reference chunks: {exc}", file=sys.stderr)
             raise

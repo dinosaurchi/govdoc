@@ -37,6 +37,7 @@ class DemoScenarioOut(BaseModel):
     description: str | None = None
     document_id: str | None = None
     category: str | None = None
+    created_at: datetime | None = None
 
     class Config:
         from_attributes = True

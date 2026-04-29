@@ -98,6 +98,18 @@ type Department = {
   name: string;
 };
 
+type EvidenceResult = {
+  id: string;
+  text: string;
+  source: string;
+  score: number;
+};
+
+type EvidenceResponse = {
+  document_id: string;
+  results: EvidenceResult[];
+};
+
 type DocDetail = {
   id: string;
   title: string;
@@ -160,6 +172,9 @@ function DocumentDetailInner({ id }: { id: string }) {
   const [showConsultInput, setShowConsultInput] = useState(false);
   const [consultBody, setConsultBody] = useState('');
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [evidence, setEvidence] = useState<EvidenceResult[]>([]);
+  const [evidenceLoading, setEvidenceLoading] = useState(false);
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
   const [showRerouteInput, setShowRerouteInput] = useState(false);
   const [rerouteDepartmentId, setRerouteDepartmentId] = useState('');
   const [rerouteRationale, setRerouteRationale] = useState('');
@@ -227,6 +242,30 @@ function DocumentDetailInner({ id }: { id: string }) {
       }
     })();
     return () => { active = false; };
+  }, [id, role]);
+
+  useEffect(() => {
+    let active = true;
+    setEvidenceLoading(true);
+    setEvidenceError(null);
+
+    (async () => {
+      try {
+        const data = await apiGet<EvidenceResponse>(`/documents/${id}/evidence`, role);
+        if (!active) return;
+        setEvidence(data.results);
+      } catch (err: unknown) {
+        if (!active) return;
+        setEvidence([]);
+        setEvidenceError(err instanceof Error ? err.message : 'Failed to load evidence');
+      } finally {
+        if (active) setEvidenceLoading(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
   }, [id, role]);
 
   const handleAction = async (action: string, payload: Record<string, string> = {}) => {
@@ -541,6 +580,48 @@ function DocumentDetailInner({ id }: { id: string }) {
                     Run AI analysis
                   </button>
                 </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card data-testid="document-evidence-panel">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <ScrollText size={18} className="text-slate-600" /> Evidence & references
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {evidenceLoading ? (
+                <div className="flex items-center gap-2 text-sm text-slate-500">
+                  <Loader2 className="animate-spin text-blue-600" size={16} />
+                  Loading ranked references…
+                </div>
+              ) : evidenceError ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+                  {evidenceError}
+                </div>
+              ) : evidence.length === 0 ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                  No evidence matches were found for this document.
+                </div>
+              ) : (
+                evidence.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-2"
+                    data-testid="document-evidence-item"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs font-black uppercase tracking-wider text-slate-400 truncate">
+                        {item.source}
+                      </p>
+                      <Badge variant="outline" className="text-[10px] font-mono shrink-0">
+                        {(item.score * 100).toFixed(1)}%
+                      </Badge>
+                    </div>
+                    <p className="text-sm leading-relaxed text-slate-700">{item.text}</p>
+                  </div>
+                ))
               )}
             </CardContent>
           </Card>
