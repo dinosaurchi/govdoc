@@ -103,6 +103,9 @@ export default function ResponsePage() {
   const [visibleLimit, setVisibleLimit] = useState(INITIAL_SIDEBAR_LIMIT);
   const responseListRef = useRef<HTMLDivElement>(null);
 
+  const fetchResponseDetail = async (docId: string): Promise<ResponseDetailDoc> =>
+    apiGet<ResponseDetailDoc>(`/documents/${docId}`, role);
+
   const fetchResponses = async (opts?: { preserveSelection?: boolean }) => {
     try {
       const data = await apiGet<ResponseListDoc[]>('/documents/', role);
@@ -175,7 +178,7 @@ export default function ResponsePage() {
     setLoadingDetail(true);
     (async () => {
       try {
-        const data = await apiGet<ResponseDetailDoc>(`/documents/${selectedDocId}`, role);
+        const data = await fetchResponseDetail(selectedDocId);
         if (active) setSelectedDoc(data);
       } catch (err) {
         console.error(err);
@@ -202,6 +205,7 @@ export default function ResponsePage() {
         await apiPost(`/documents/${selectedDoc.id}/close`, undefined, role);
       }
       await fetchResponses({ preserveSelection: true });
+      setSelectedDoc(await fetchResponseDetail(selectedDoc.id));
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Action failed');
     } finally {

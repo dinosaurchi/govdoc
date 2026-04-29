@@ -1,15 +1,18 @@
 """Seed and demo data services."""
 
 import hashlib
+import shutil
 import uuid
 from pathlib import Path
 from typing import List
 
 from sqlalchemy.orm import Session
 
-from app.models.system import Role, Department, DemoScenario, AuditEvent
+from app.models.system import Role, Department, DemoScenario, AuditEvent, PromptVersion
 from app.models.document import (
     AIAnalysis,
+    AnalysisSource,
+    AnalysisStage,
     Document,
     DocumentFile,
     DocumentStatus,
@@ -134,37 +137,40 @@ DEMO_WORKFLOW_PLANS = {
         "assigned_reviewer_role": "reviewer",
         "routing_decision": RoutingDecisionType.accepted,
         "routing_rationale": "Procurement-related administrative request routed to Finance for final response preparation.",
-        "final_status": DocumentStatus.closed,
+        "final_status": DocumentStatus.analyzed,
     },
     "ambiguity-001": {
-        "department_id": "phong_phap_che",
-        "assigned_reviewer_role": "reviewer",
-        "routing_decision": RoutingDecisionType.accepted,
-        "routing_rationale": "Multi-department legal interpretation requires Legal to lead with consultant input before closeout.",
-        "final_status": DocumentStatus.in_consultation,
-        "consultation_notes": [
-            {
-                "author_role": "reviewer",
-                "target_role": "consultant",
-                "body": "Please confirm whether the Ministry of Justice guidance should be handled primarily by Legal or escalated jointly with Planning.",
-            },
-            {
-                "author_role": "consultant",
-                "target_role": "reviewer",
-                "body": "Initial review suggests Legal should lead, but the final response should reference Planning impact before issuance.",
-            },
-        ],
+        "department_id": None,
+        "assigned_reviewer_role": None,
+        "routing_decision": None,
+        "routing_rationale": None,
+        "route_overrides": {
+            "secondary_department": "phong_ke_hoach",
+            "routing_confidence": 0.58,
+            "routing_rationale": "The document spans legal interpretation and planning impact, so the route is ambiguous.",
+            "needs_consultation": True,
+            "needs_supervisor_review": True,
+        },
+        "escalation_overrides": {
+            "primary_recommendation": "phong_phap_che",
+            "alternatives": ["phong_ke_hoach"],
+            "ambiguity_explanation": "Cross-department overlap requires legal review plus planning input before assignment.",
+            "final_confidence": 0.58,
+            "needs_consultation": True,
+            "consultation_reason": "The document impacts both legal affairs and planning responsibilities.",
+        },
+        "final_status": DocumentStatus.analyzed,
     },
     "scan-001": {
-        "department_id": "phong_hanh_chinh",
-        "assigned_reviewer_role": "reviewer",
-        "routing_decision": RoutingDecisionType.accepted,
-        "routing_rationale": "OCR recovered sufficient administrative content for reviewer closeout preparation.",
-        "final_status": DocumentStatus.under_review,
+        "department_id": None,
+        "assigned_reviewer_role": None,
+        "routing_decision": None,
+        "routing_rationale": None,
+        "final_status": DocumentStatus.analyzed,
     },
     "out-of-scope-001": {
         "department_id": None,
-        "assigned_reviewer_role": "reviewer",
+        "assigned_reviewer_role": "supervisor",
         "routing_decision": RoutingDecisionType.out_of_scope,
         "routing_rationale": "Document is an internal weekly schedule and falls outside the intake workflow scope.",
         "final_status": DocumentStatus.out_of_scope,
@@ -184,6 +190,36 @@ class DemoService:
     async def seed_baseline(self):
         """Seed roles and departments on startup."""
         seed_all(self.db)
+
+    def reset_demo_state(self) -> None:
+        """Delete documents, demo scenarios, and uploaded demo artifacts.
+
+        This intentionally clears all workflow records so demo reset returns the
+        app to a known state instead of layering seeded records on top of stale
+        uploads from prior runs.
+        """
+        document_ids = [row[0] for row in self.db.query(Document.id).all()]
+
+        self.db.query(ConsultationNote).delete(synchronize_session=False)
+        self.db.query(RoutingDecision).delete(synchronize_session=False)
+        self.db.query(AIAnalysis).delete(synchronize_session=False)
+        self.db.query(ExtractedArtifact).delete(synchronize_session=False)
+        self.db.query(DocumentFile).delete(synchronize_session=False)
+        self.db.query(AuditEvent).delete(synchronize_session=False)
+        self.db.query(DemoScenario).delete(synchronize_session=False)
+        self.db.query(Document).delete(synchronize_session=False)
+        self.db.query(Role).delete(synchronize_session=False)
+        self.db.query(Department).delete(synchronize_session=False)
+        self.db.query(PromptVersion).delete(synchronize_session=False)
+        self.db.commit()
+
+        root = Path(settings.LOCAL_FILE_STORAGE_ROOT)
+        if not root.is_absolute():
+            root = _PROJECT_ROOT / root
+        for document_id in document_ids:
+            candidate = root / document_id
+            if candidate.exists():
+                shutil.rmtree(candidate)
 
     # ── Internal helpers ─────────────────────────────────────────────
     def _store_fixture_file(self, doc_id: str, src_path: Path) -> dict:
@@ -302,7 +338,10 @@ class DemoService:
         from app.services.storage import LocalFileStorage
 
         extractor = RealExtractor()
-        storage = LocalFileStorage()
+        storage_root = Path(settings.LOCAL_FILE_STORAGE_ROOT)
+        if not storage_root.is_absolute():
+            storage_root = _PROJECT_ROOT / storage_root
+        storage = LocalFileStorage(str(storage_root))
         analysis_svc = AnalysisService(self.db, ai_provider, prompt_registry=prompt_registry)
 
         processed: List[Document] = []
@@ -376,16 +415,13 @@ class DemoService:
     def stage_seeded_documents(self) -> List[Document]:
         """Normalize seeded scenarios into a realistic cross-page demo state."""
         scenarios = self.db.query(DemoScenario).all()
-        docs_by_scenario: list[tuple[DemoScenario, Document]] = []
+        docs_by_scenario: list[tuple[DemoScenario, str]] = []
         for scenario in scenarios:
             if not scenario.document_id:
                 continue
-            doc = self.db.query(Document).filter_by(id=scenario.document_id).first()
-            if not doc:
-                continue
-            docs_by_scenario.append((scenario, doc))
+            docs_by_scenario.append((scenario, scenario.document_id))
 
-        doc_ids = [doc.id for _, doc in docs_by_scenario]
+        doc_ids = [doc_id for _, doc_id in docs_by_scenario]
         if not doc_ids:
             return []
 
@@ -400,9 +436,13 @@ class DemoService:
             AuditEvent.event_type.notin_(("ai.call", "extraction.completed")),
         ).delete(synchronize_session=False)
         self.db.flush()
+        self.db.expire_all()
 
         staged: list[Document] = []
-        for scenario, doc in docs_by_scenario:
+        for scenario, doc_id in docs_by_scenario:
+            doc = self.db.query(Document).filter_by(id=doc_id).first()
+            if not doc:
+                continue
             if not doc.artifacts:
                 raise ValueError(f"Seeded scenario {scenario.id} is missing extracted artifacts")
             if len(doc.analyses) < 3:
@@ -431,12 +471,24 @@ class DemoService:
         self.analyze_seeded(ai_provider, prompt_registry)
         return self.stage_seeded_documents()
 
+    async def reset_demo_ready(self, ai_provider, prompt_registry) -> List[Document]:
+        """Fully reset and rebuild the demo data into a deterministic ready state."""
+        self.reset_demo_state()
+        await self.seed_baseline()
+        return await self.seed_demo_ready(ai_provider, prompt_registry)
+
     def _apply_workflow_plan(self, doc: Document, plan: dict) -> None:
         department_id = plan["department_id"]
         reviewer_role = plan["assigned_reviewer_role"]
         decision = plan["routing_decision"]
         rationale = plan["routing_rationale"]
         final_status = plan["final_status"]
+
+        if final_status == DocumentStatus.analyzed:
+            self._apply_analysis_overrides(doc, plan)
+            self._normalize_ai_routing(doc, department_id, reviewer_role, decision, rationale)
+            self.db.flush()
+            return
 
         self._transition_document(doc, DocumentStatus.routed, actor_role=reviewer_role)
         self.db.add(
@@ -475,6 +527,74 @@ class DemoService:
             return
 
         raise ValueError(f"Unsupported demo final status: {final_status}")
+
+    def _apply_analysis_overrides(self, doc: Document, plan: dict) -> None:
+        for stage_name, override_key in (("route", "route_overrides"), ("escalate", "escalation_overrides")):
+            overrides = plan.get(override_key)
+            if not overrides:
+                continue
+            analysis = next((item for item in doc.analyses if item.stage.value == stage_name), None)
+            if not analysis:
+                route_analysis = next((item for item in doc.analyses if item.stage == AnalysisStage.route), None)
+                if not route_analysis:
+                    raise ValueError(f"Seeded scenario for {doc.id} is missing route analysis")
+                analysis = AIAnalysis(
+                    id=str(uuid.uuid4()),
+                    document_id=doc.id,
+                    stage=AnalysisStage(stage_name),
+                    model_name=route_analysis.model_name,
+                    prompt_version=route_analysis.prompt_version,
+                    source=AnalysisSource.cached,
+                    payload_json=dict(overrides),
+                    confidence=overrides.get("final_confidence") or overrides.get("routing_confidence"),
+                )
+                self.db.add(analysis)
+                doc.analyses.append(analysis)
+                continue
+            payload = dict(analysis.payload_json or {})
+            payload.update(overrides)
+            analysis.payload_json = payload
+            analysis.confidence = payload.get("final_confidence") or payload.get("routing_confidence")
+
+    def _normalize_ai_routing(
+        self,
+        doc: Document,
+        department_id: str | None,
+        reviewer_role: str | None,
+        decision: RoutingDecisionType | None,
+        rationale: str | None,
+    ) -> None:
+        latest_routing = None
+        if doc.routing_decisions:
+            latest_routing = max(
+                doc.routing_decisions,
+                key=lambda item: item.created_at.timestamp() if item.created_at else 0,
+            )
+
+        if latest_routing is None:
+            route_analysis = next((item for item in doc.analyses if item.stage.value == "route"), None)
+            route_payload = route_analysis.payload_json if route_analysis else {}
+            latest_routing = RoutingDecision(
+                id=str(uuid.uuid4()),
+                document_id=doc.id,
+                suggested_department_id=route_payload.get("suggested_department"),
+                final_department_id=None,
+                decided_by_role=None,
+                decision=decision or RoutingDecisionType.accepted,
+                rationale=rationale or route_payload.get("routing_rationale"),
+            )
+            self.db.add(latest_routing)
+
+        if latest_routing:
+            latest_routing.final_department_id = department_id
+            latest_routing.decided_by_role = reviewer_role
+            if decision is not None:
+                latest_routing.decision = decision
+            if rationale is not None:
+                latest_routing.rationale = rationale
+
+        doc.assigned_department_id = department_id
+        doc.assigned_reviewer_role = reviewer_role
 
     def _transition_document(self, doc: Document, target: DocumentStatus, *, actor_role: str) -> None:
         if doc.status == target:

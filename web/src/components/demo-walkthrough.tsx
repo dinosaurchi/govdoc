@@ -31,8 +31,8 @@ export function DemoWalkthrough() {
             <Link to="/" className="font-semibold text-blue-700 underline-offset-2 hover:underline">
               home page
             </Link>
-            , use <span className="font-semibold">Seed Baseline Data</span> to reset stored documents to a known starting
-            queue so a guided session stays in sync—figures below are computed from those records like any other
+            , use <span className="font-semibold">Reset Demo Data</span> to rebuild the seeded scenario set into a known
+            starting queue so a guided session stays in sync. Figures below are computed from those records like any other
             deployment.
           </li>
           <li>

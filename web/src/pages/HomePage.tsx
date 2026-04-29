@@ -3,19 +3,54 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/com
 import { Badge } from '@/components/ui-badge';
 import { ArrowRight, CheckCircle2, Clock, AlertCircle, FileUp, ListChecks, MessageSquare, LayoutDashboard, Database, Loader2, Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useState } from 'react';
-import { apiPost } from '@/lib/api';
+import { useEffect, useState } from 'react';
+import { apiGet, apiPost } from '@/lib/api';
+
+type DemoScenario = {
+  id: string;
+  name: string;
+  description: string | null;
+  document_id: string | null;
+  category: string | null;
+};
+
+type DemoResetResponse = {
+  message: string;
+  documents: Array<{ id: string; title: string; status: string }>;
+};
 
 export default function HomePage() {
   const { role } = useRole();
   const [seeding, setSeeding] = useState(false);
   const [seedResult, setSeedResult] = useState<string | null>(null);
+  const [scenarios, setScenarios] = useState<DemoScenario[]>([]);
+
+  const fetchScenarios = async () => {
+    try {
+      const next = await apiGet<DemoScenario[]>('/demo/scenarios');
+      setScenarios(next);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const next = await apiGet<DemoScenario[]>('/demo/scenarios');
+        setScenarios(next);
+      } catch (err) {
+        console.error(err);
+      }
+    })();
+  }, []);
 
   const handleSeed = async () => {
     setSeeding(true);
     try {
-      const res = await apiPost<{message: string}>('/demo/reset');
+      const res = await apiPost<DemoResetResponse>('/demo/reset');
       setSeedResult(res.message || 'Demo data reset successfully.');
+      await fetchScenarios();
       setTimeout(() => setSeedResult(null), 5000);
     } catch (err: unknown) {
       setSeedResult(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -41,7 +76,7 @@ export default function HomePage() {
             className="px-6 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold uppercase tracking-widest text-slate-600 hover:bg-slate-200 transition flex items-center gap-2"
           >
             {seeding ? <Loader2 size={14} className="animate-spin" /> : <Database size={14} />}
-            Seed Baseline Data
+            Reset Demo Data
           </button>
           <Link
             to="/dashboard#demo-walkthrough"
@@ -112,6 +147,53 @@ export default function HomePage() {
           <p className="text-sm text-slate-500">Scaffolded adapter layer for Qwen-powered summaries, entity extraction, and routing suggestions.</p>
         </div>
       </div>
+
+      <section className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-bold tracking-tight text-slate-900">Seeded demo scenarios</h2>
+            <p className="text-sm text-slate-500">Prebuilt records for the hero, ambiguity, scan, and out-of-scope flows.</p>
+          </div>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          {scenarios.length === 0 ? (
+            <div className="col-span-full rounded-2xl border border-dashed border-slate-200 bg-white p-6 text-sm text-slate-500">
+              No demo scenarios are loaded. Use <span className="font-semibold text-slate-700">Reset Demo Data</span> to rebuild them.
+            </div>
+          ) : (
+            scenarios.map((scenario) => (
+              <Card key={scenario.id} className="border-slate-200 bg-white">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <CardTitle className="text-base leading-snug">{scenario.name}</CardTitle>
+                    {scenario.category && (
+                      <Badge variant="outline" className="uppercase text-[10px] tracking-widest">
+                        {scenario.category.replace(/_/g, ' ')}
+                      </Badge>
+                    )}
+                  </div>
+                  {scenario.description && (
+                    <CardDescription className="text-sm leading-relaxed">{scenario.description}</CardDescription>
+                  )}
+                </CardHeader>
+                <CardContent className="pt-0">
+                  {scenario.document_id ? (
+                    <Link
+                      to={`/documents/${scenario.document_id}`}
+                      className="inline-flex items-center gap-2 text-sm font-bold text-blue-700 hover:text-blue-800"
+                    >
+                      Open scenario
+                      <ArrowRight size={14} />
+                    </Link>
+                  ) : (
+                    <p className="text-sm text-slate-400 italic">Scenario record is missing its document link.</p>
+                  )}
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
+      </section>
     </div>
   );
 }
